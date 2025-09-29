@@ -67,27 +67,6 @@ if dmin is None:
     st.warning("Aucune donnée dans matrix_lignes.")
     st.stop()
 
-# ---------- UI Filtres ----------
-col_f1, col_f2 = st.columns([1, 2])
-with col_f1:
-    drange = st.date_input("Période", value=(dmin, dmax), min_value=dmin, max_value=dmax)
-    if isinstance(drange, tuple):
-        dstart, dend = drange
-    else:
-        dstart, dend = dmin, dmax
-
-with col_f2:
-    # Sélecteurs pour comparaison A vs B
-    default_a = stores[0] if stores else None
-    default_b = stores[1] if len(stores) >= 2 else (stores[0] if stores else None)
-    store_a = st.selectbox("Magasin A", options=stores, index=stores.index(default_a) if default_a in stores else 0)
-    store_b = st.selectbox("Magasin B", options=stores, index=stores.index(default_b) if default_b in stores else 0)
-
-# Granularité pour la comparaison
-granularity = st.radio("Granularité d’agrégation", ["Jour", "Semaine", "Mois"], horizontal=True)
-
-st.caption("Astuce : choisis ta période, tes deux magasins à comparer, puis clique sur **Charger / Actualiser les données**.")
-
 # ---------- Chargement des données selon filtres ----------
 @st.cache_data(ttl=300)
 def load_data(dstart: date, dend: date) -> pd.DataFrame:
@@ -107,39 +86,113 @@ def load_data(dstart: date, dend: date) -> pd.DataFrame:
         df["famille"] = df["libelle_article"].apply(derive_family_from_label)
     return df
 
-if st.button("Charger / Actualiser les données", type="primary"):
+# ---------- UI Filtres (📅 période + ⏱️ granularité + 🏬 magasins) ----------
+col_filters = st.columns([2, 2, 3])  # Période | Granularité | Magasins
+
+# 📅 Période
+with col_filters[0]:
+    st.markdown("<p style='font-size:18px; font-weight:600; margin-bottom:-8px;'>📅 Période</p>", unsafe_allow_html=True)
+    drange = st.date_input(
+        label="",
+        value=(dmin, dmax),
+        min_value=dmin,
+        max_value=dmax,
+        label_visibility="collapsed"
+    )
+
+# Forcer valeurs pour éviter NameError
+if isinstance(drange, tuple):
+    dstart, dend = drange
+else:
+    dstart, dend = dmin, dmax
+
+# ⏱️ Granularité
+with col_filters[1]:
+    st.markdown("<p style='font-size:18px; font-weight:600; margin-bottom:-8px;'>⏱️ Granularité</p>", unsafe_allow_html=True)
+    granularity = st.radio(
+        label="",
+        options=["Jour", "Semaine", "Mois"],
+        horizontal=True,
+        label_visibility="collapsed"
+    )
+
+# 🏬 Magasins
+with col_filters[2]:
+    st.markdown("<p style='font-size:18px; font-weight:600; margin-bottom:-8px;'>🏬 Magasins à comparer</p>", unsafe_allow_html=True)
+    store_options = ["Tous les magasins"] + stores
+    selected_stores = st.multiselect(
+        label="",
+        options=store_options,
+        default=["Tous les magasins"],
+        label_visibility="collapsed"
+    )
+
+# ⚡ Bouton
+if st.button("⚡ Charger / Actualiser les données", type="primary"):
+    if "Tous les magasins" in selected_stores:
+        st.session_state["stores_selected"] = stores
+    else:
+        st.session_state["stores_selected"] = selected_stores
     st.session_state["df"] = load_data(dstart, dend)
 
+st.caption("Astuce : choisis 📅 la période, ⏱️ la granularité et 🏬 les magasins, puis clique sur ⚡ Charger.")
+
+# ---------- Récupération des données ----------
 df = st.session_state.get("df")
+stores_selected = st.session_state.get("stores_selected", [])
+
 if df is None:
-    st.info("Clique sur **Charger / Actualiser les données** pour afficher le dashboard.")
+    st.info("Clique sur ⚡ Charger / Actualiser les données pour afficher le dashboard.")
     st.stop()
 
 if df.empty:
     st.warning("Aucune ligne pour ces filtres.")
     st.stop()
 
-# ---------- KPIs globaux (toute la période, tous magasins filtrés par la période) ----------
+# ---------- KPIs globaux (bordure rouge + emoji) ----------
 col1, col2, col3, col4 = st.columns(4)
+
+def kpi_card(title, value, emoji):
+    return f"""
+    <div style="
+        border: 3px solid red;
+        border-radius: 12px;
+        padding: 20px;
+        text-align: center;
+        background-color: #fff;
+        height: 120px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+    ">
+        <div style="font-size: 18px; font-weight: 600; color: #b00000; margin-bottom: 8px;">
+            {emoji} {title}
+        </div>
+        <div style="font-size: 32px; font-weight: bold; color: #000;">
+            {value}
+        </div>
+    </div>
+    """
+
 with col1:
-    st.metric("CA TTC", f"{df['ventes_ttc'].sum():,.2f} €".replace(",", " ").replace(".", ","))
+    st.markdown(kpi_card("CA TTC", f"{df['ventes_ttc'].sum():,.2f} €".replace(",", " ").replace(".", ","), "💰"), unsafe_allow_html=True)
 with col2:
-    st.metric("CA HT", f"{df['ventes_ht'].sum():,.2f} €".replace(",", " ").replace(".", ","))
+    st.markdown(kpi_card("CA HT", f"{df['ventes_ht'].sum():,.2f} €".replace(",", " ").replace(".", ","), "📊"), unsafe_allow_html=True)
 with col3:
-    st.metric("Marge HT", f"{df['marge_ht'].sum():,.2f} €".replace(",", " ").replace(".", ","))
+    st.markdown(kpi_card("Marge HT", f"{df['marge_ht'].sum():,.2f} €".replace(",", " ").replace(".", ","), "🏦"), unsafe_allow_html=True)
 with col4:
     pct = (df["marge_ht"].sum() / df["ventes_ht"].sum() * 100) if df["ventes_ht"].sum() else 0
-    st.metric("Marge %", f"{pct:,.2f} %".replace(",", " ").replace(".", ","))
+    st.markdown(kpi_card("Marge %", f"{pct:,.2f} %".replace(",", " ").replace(".", ","), "🔥"), unsafe_allow_html=True)
 
 st.divider()
 
-# ---------- Courbe comparative A vs B (CA TTC) avec granularité ----------
+# ---------- Courbe comparative entre magasins ----------
 def aggregate(df_in: pd.DataFrame, granularity: str) -> pd.DataFrame:
     dfg = df_in.copy()
     if granularity == "Jour":
         dfg["bucket"] = dfg["period_date"].dt.date
     elif granularity == "Semaine":
-        # ISO week start (Lundi) : on normalise à la semaine
         dfg["bucket"] = dfg["period_date"] - pd.to_timedelta(dfg["period_date"].dt.weekday, unit="D")
         dfg["bucket"] = dfg["bucket"].dt.date
     else:  # Mois
@@ -152,42 +205,39 @@ def aggregate(df_in: pd.DataFrame, granularity: str) -> pd.DataFrame:
                    qte=("qte","sum")))
     return out
 
-df_a = df[df["store_name"] == store_a]
-df_b = df[df["store_name"] == store_b]
+if stores_selected:
+    comp_list = []
+    for store in stores_selected:
+        df_store = df[df["store_name"] == store]
+        agg_store = aggregate(df_store, granularity)
+        agg_store["magasin"] = store
+        comp_list.append(agg_store)
 
-agg_a = aggregate(df_a, granularity)
-agg_b = aggregate(df_b, granularity)
+    comp = pd.concat(comp_list, ignore_index=True)
 
-# Concat pour graphe
-agg_a["magasin"] = store_a
-agg_b["magasin"] = store_b
-comp = pd.concat([agg_a, agg_b], ignore_index=True)
-
-st.subheader(f"Comparaison {store_a} vs {store_b} — CA TTC ({granularity})")
-line_comp = alt.Chart(comp).mark_line(point=True).encode(
-    x=alt.X("bucket:T", title=f"Période ({granularity})"),
-    y=alt.Y("ca_ttc:Q", title="CA TTC"),
-    color=alt.Color("magasin:N", title="Magasin"),
-    tooltip=["magasin","bucket:T","ca_ttc:Q","ca_ht:Q","marge:Q","qte:Q"]
-).properties(height=320)
-st.altair_chart(line_comp, use_container_width=True)
+    st.markdown(f"<p style='font-size:22px; font-weight:700;'>📈 Comparaison des magasins — CA TTC ({granularity})</p>", unsafe_allow_html=True)
+    line_comp = alt.Chart(comp).mark_line(point=True).encode(
+        x=alt.X("bucket:T", title=f"Période ({granularity})"),
+        y=alt.Y("ca_ttc:Q", title="CA TTC"),
+        color=alt.Color("magasin:N", title="Magasin"),
+        tooltip=["magasin","bucket:T","ca_ttc:Q","ca_ht:Q","marge:Q","qte:Q"]
+    ).properties(height=320)
+    st.altair_chart(line_comp, use_container_width=True)
 
 st.divider()
 
 # ---------- Camembert : CA TTC par famille ----------
-st.subheader("Répartition du CA TTC par famille (camembert)")
+st.markdown("<p style='font-size:22px; font-weight:700;'>🥧 Répartition du CA TTC par famille</p>", unsafe_allow_html=True)
 target_for_pie = st.selectbox(
-    "Afficher le camembert pour :",
-    options=[f"Tous magasins ({dstart} → {dend})", store_a, store_b],
+    "Choisir le magasin pour le camembert",
+    options=[f"Tous magasins ({dstart} → {dend})"] + stores_selected,
     index=0
 )
 
-if target_for_pie == store_a:
-    pie_df = df_a.copy()
-elif target_for_pie == store_b:
-    pie_df = df_b.copy()
-else:
+if target_for_pie == f"Tous magasins ({dstart} → {dend})":
     pie_df = df.copy()
+else:
+    pie_df = df[df["store_name"] == target_for_pie].copy()
 
 fam = (pie_df.groupby("famille", as_index=False)
               .agg(ca_ttc=("ventes_ttc","sum")))
@@ -203,7 +253,8 @@ st.altair_chart(pie, use_container_width=True)
 st.divider()
 
 # ---------- Top articles (CA TTC) ----------
-topn = st.slider("Top articles (par CA TTC)", 5, 50, 15, step=5)
+st.markdown("<p style='font-size:22px; font-weight:700;'>🏆 Top articles (par CA TTC)</p>", unsafe_allow_html=True)
+topn = st.slider(label="", min_value=5, max_value=50, value=15, step=5, label_visibility="collapsed")
 top_articles = (df.groupby(["code_article","libelle_article"], as_index=False)
                   .agg(qte=("qte","sum"), ca_ttc=("ventes_ttc","sum")))
 top_articles = top_articles.sort_values("ca_ttc", ascending=False).head(topn)
@@ -216,7 +267,7 @@ bar = alt.Chart(top_articles).mark_bar().encode(
 st.altair_chart(bar, use_container_width=True)
 
 # ---------- Table détaillée ----------
-st.subheader("Détail des lignes (période sélectionnée)")
+st.markdown("<p style='font-size:22px; font-weight:700;'>📋 Détail des lignes (période sélectionnée)</p>", unsafe_allow_html=True)
 st.dataframe(
     df.sort_values(["period_date","store_name","libelle_article"]),
     use_container_width=True
