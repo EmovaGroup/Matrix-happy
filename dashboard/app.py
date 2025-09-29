@@ -86,10 +86,9 @@ def load_data(dstart: date, dend: date) -> pd.DataFrame:
         df["famille"] = df["libelle_article"].apply(derive_family_from_label)
     return df
 
-# ---------- UI Filtres (📅 période + ⏱️ granularité + 🏬 magasins) ----------
-col_filters = st.columns([2, 2, 3])  # Période | Granularité | Magasins
+# ---------- UI Filtres ----------
+col_filters = st.columns([2, 2, 3])
 
-# 📅 Période
 with col_filters[0]:
     st.markdown("<p style='font-size:18px; font-weight:600; margin-bottom:-8px;'>📅 Période</p>", unsafe_allow_html=True)
     drange = st.date_input(
@@ -100,13 +99,11 @@ with col_filters[0]:
         label_visibility="collapsed"
     )
 
-# Forcer valeurs pour éviter NameError
 if isinstance(drange, tuple):
     dstart, dend = drange
 else:
     dstart, dend = dmin, dmax
 
-# ⏱️ Granularité
 with col_filters[1]:
     st.markdown("<p style='font-size:18px; font-weight:600; margin-bottom:-8px;'>⏱️ Granularité</p>", unsafe_allow_html=True)
     granularity = st.radio(
@@ -116,7 +113,6 @@ with col_filters[1]:
         label_visibility="collapsed"
     )
 
-# 🏬 Magasins
 with col_filters[2]:
     st.markdown("<p style='font-size:18px; font-weight:600; margin-bottom:-8px;'>🏬 Magasins à comparer</p>", unsafe_allow_html=True)
     store_options = ["Tous les magasins"] + stores
@@ -129,15 +125,12 @@ with col_filters[2]:
 
 # ⚡ Bouton
 if st.button("⚡ Charger / Actualiser les données", type="primary"):
-    if "Tous les magasins" in selected_stores:
-        st.session_state["stores_selected"] = stores
-    else:
-        st.session_state["stores_selected"] = selected_stores
+    st.session_state["stores_selected"] = selected_stores
     st.session_state["df"] = load_data(dstart, dend)
 
 st.caption("Astuce : choisis 📅 la période, ⏱️ la granularité et 🏬 les magasins, puis clique sur ⚡ Charger.")
 
-# ---------- Récupération des données ----------
+# ---------- Récupération ----------
 df = st.session_state.get("df")
 stores_selected = st.session_state.get("stores_selected", [])
 
@@ -149,7 +142,7 @@ if df.empty:
     st.warning("Aucune ligne pour ces filtres.")
     st.stop()
 
-# ---------- KPIs globaux (bordure rouge + emoji) ----------
+# ---------- KPIs ----------
 col1, col2, col3, col4 = st.columns(4)
 
 def kpi_card(title, value, emoji):
@@ -187,29 +180,40 @@ with col4:
 
 st.divider()
 
-# ---------- Courbe comparative entre magasins ----------
-def aggregate(df_in: pd.DataFrame, granularity: str) -> pd.DataFrame:
+# ---------- Courbe comparative ----------
+def aggregate(df_in: pd.DataFrame, granularity: str, by_store=True) -> pd.DataFrame:
     dfg = df_in.copy()
     if granularity == "Jour":
         dfg["bucket"] = dfg["period_date"].dt.date
     elif granularity == "Semaine":
         dfg["bucket"] = dfg["period_date"] - pd.to_timedelta(dfg["period_date"].dt.weekday, unit="D")
         dfg["bucket"] = dfg["bucket"].dt.date
-    else:  # Mois
+    else:
         dfg["bucket"] = dfg["period_date"].dt.to_period("M").dt.to_timestamp()
         dfg["bucket"] = dfg["bucket"].dt.date
-    out = (dfg.groupby(["store_name","bucket"], as_index=False)
-              .agg(ca_ttc=("ventes_ttc","sum"),
-                   ca_ht=("ventes_ht","sum"),
-                   marge=("marge_ht","sum"),
-                   qte=("qte","sum")))
+
+    group_cols = ["bucket"]
+    if by_store:
+        group_cols.insert(0, "store_name")
+
+    out = (dfg.groupby(group_cols, as_index=False)
+              .agg(ca_ttc=("ventes_ttc", "sum"),
+                   ca_ht=("ventes_ht", "sum"),
+                   marge=("marge_ht", "sum"),
+                   qte=("qte", "sum")))
     return out
 
 if stores_selected:
     comp_list = []
-    for store in stores_selected:
+
+    if "Tous les magasins" in stores_selected:
+        agg_all = aggregate(df, granularity, by_store=False)
+        agg_all["magasin"] = "Tous les magasins"
+        comp_list.append(agg_all)
+
+    for store in [s for s in stores_selected if s != "Tous les magasins"]:
         df_store = df[df["store_name"] == store]
-        agg_store = aggregate(df_store, granularity)
+        agg_store = aggregate(df_store, granularity, by_store=True)
         agg_store["magasin"] = store
         comp_list.append(agg_store)
 
@@ -226,8 +230,20 @@ if stores_selected:
 
 st.divider()
 
-# ---------- Camembert : CA TTC par famille ----------
+# ---------- Camembert ----------
 st.markdown("<p style='font-size:22px; font-weight:700;'>🥧 Répartition du CA TTC par famille</p>", unsafe_allow_html=True)
+
+# CSS pour encadrer uniquement le selectbox
+st.markdown("""
+    <style>
+    div[data-baseweb="select"] {
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        padding: 2px;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 target_for_pie = st.selectbox(
     "Choisir le magasin pour le camembert",
     options=[f"Tous magasins ({dstart} → {dend})"] + stores_selected,
@@ -240,7 +256,7 @@ else:
     pie_df = df[df["store_name"] == target_for_pie].copy()
 
 fam = (pie_df.groupby("famille", as_index=False)
-              .agg(ca_ttc=("ventes_ttc","sum")))
+              .agg(ca_ttc=("ventes_ttc", "sum")))
 fam["pct"] = fam["ca_ttc"] / fam["ca_ttc"].sum() * 100 if fam["ca_ttc"].sum() else 0
 
 pie = alt.Chart(fam).mark_arc().encode(
@@ -252,7 +268,7 @@ st.altair_chart(pie, use_container_width=True)
 
 st.divider()
 
-# ---------- Top articles (CA TTC) ----------
+# ---------- Top articles ----------
 st.markdown("<p style='font-size:22px; font-weight:700;'>🏆 Top articles (par CA TTC)</p>", unsafe_allow_html=True)
 topn = st.slider(label="", min_value=5, max_value=50, value=15, step=5, label_visibility="collapsed")
 top_articles = (df.groupby(["code_article","libelle_article"], as_index=False)
