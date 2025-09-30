@@ -154,10 +154,15 @@ with col_filters[0]:
         max_value=dmax,
         label_visibility="collapsed"
     )
-if isinstance(drange, tuple):
+
+# Gestion robuste de la période choisie
+if isinstance(drange, tuple) and len(drange) == 2:
     dstart, dend = drange
+elif hasattr(drange, "year"):  # si une seule date est choisie
+    dstart, dend = drange, drange
 else:
-    dstart, dend = dmin, dmax
+    st.error("⚠️ Sélection de période invalide. Veuillez choisir une ou deux dates.")
+    st.stop()
 
 with col_filters[1]:
     st.markdown("<p style='font-size:18px; font-weight:600; margin-bottom:-8px;'>⏱️ Granularité</p>", unsafe_allow_html=True)
