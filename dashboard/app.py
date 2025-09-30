@@ -22,6 +22,62 @@ def get_client() -> Client:
 supabase = get_client()
 
 st.set_page_config(page_title="Matrix Dashboard", layout="wide")
+
+# ---------- Utilisateurs autorisés ----------
+ALLOWED = {
+    "o.ginoux@emova-group.com",
+    "d.decarriere@emova-group.com",
+    "dsi@emova-group.com",
+    "sa.ouni@emova-group.com",
+}
+
+# ---------- Auth ----------
+if "auth" not in st.session_state:
+    st.session_state["auth"] = {"user": None, "session": None, "error": None}
+
+if st.session_state["auth"]["user"] is None:
+    st.subheader("🔑 Connexion sécurisée")
+    email = st.text_input("Email")
+    password = st.text_input("Mot de passe", type="password")
+    if st.button("Se connecter"):
+        try:
+            auth_res = supabase.auth.sign_in_with_password(
+                {"email": email, "password": password}
+            )
+            user = auth_res.user
+            if user and user.email in ALLOWED:
+                st.session_state["auth"]["user"] = user
+                st.session_state["auth"]["session"] = auth_res.session
+                st.rerun()
+            else:
+                st.error("🚫 Vous n'avez pas accès à ce dashboard.")
+        except Exception as e:
+            st.error(f"❌ Identifiants invalides : {e}")
+    st.stop()
+
+user = st.session_state["auth"]["user"]
+st.sidebar.success(f"✅ Connecté : {user.email}")
+if st.sidebar.button("Se déconnecter"):
+    st.session_state["auth"] = {"user": None, "session": None, "error": None}
+    st.rerun()
+
+# ---------- Message de bienvenue personnalisé ----------
+USER_NAMES = {
+    "sa.ouni@emova-group.com": "Salah Ouni",
+    "o.ginoux@emova-group.com": "Olivier Ginoux",
+    "d.decarriere@emova-group.com": "David Decarrière",
+    "dsi@emova-group.com": "DSI"
+}
+
+email = user.email.lower()
+display_name = USER_NAMES.get(email, email)
+
+st.markdown(
+    f"<h2 style='color:#1a73e8;'>👋 Bienvenue {display_name} !</h2>",
+    unsafe_allow_html=True
+)
+
+# ---------- Dashboard ----------
 st.title("📊 Matrix — Ventes & Marge")
 
 # ---------- Aide : dériver une "famille" depuis le libellé ----------
@@ -98,7 +154,6 @@ with col_filters[0]:
         max_value=dmax,
         label_visibility="collapsed"
     )
-
 if isinstance(drange, tuple):
     dstart, dend = drange
 else:
@@ -147,18 +202,9 @@ col1, col2, col3, col4 = st.columns(4)
 
 def kpi_card(title, value, emoji):
     return f"""
-    <div style="
-        border: 3px solid red;
-        border-radius: 12px;
-        padding: 20px;
-        text-align: center;
-        background-color: #fff;
-        height: 120px;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
-    ">
+    <div style="border: 3px solid red; border-radius: 12px; padding: 20px; text-align: center;
+    background-color: #fff; height: 120px; display: flex; flex-direction: column;
+    justify-content: center; align-items: center;">
         <div style="font-size: 18px; font-weight: 600; color: #b00000; margin-bottom: 8px;">
             {emoji} {title}
         </div>
@@ -205,7 +251,6 @@ def aggregate(df_in: pd.DataFrame, granularity: str, by_store=True) -> pd.DataFr
 
 if stores_selected:
     comp_list = []
-
     if "Tous les magasins" in stores_selected:
         agg_all = aggregate(df, granularity, by_store=False)
         agg_all["magasin"] = "Tous les magasins"
@@ -232,17 +277,7 @@ st.divider()
 
 # ---------- Camembert ----------
 st.markdown("<p style='font-size:22px; font-weight:700;'>🥧 Répartition du CA TTC par famille</p>", unsafe_allow_html=True)
-
-# CSS pour encadrer uniquement le selectbox
-st.markdown("""
-    <style>
-    div[data-baseweb="select"] {
-        border: 1px solid #ccc;
-        border-radius: 6px;
-        padding: 2px;
-    }
-    </style>
-""", unsafe_allow_html=True)
+st.markdown("""<style>div[data-baseweb="select"] {border: 1px solid #ccc;border-radius: 6px;padding: 2px;}</style>""", unsafe_allow_html=True)
 
 target_for_pie = st.selectbox(
     "Choisir le magasin pour le camembert",
@@ -271,6 +306,7 @@ st.divider()
 # ---------- Top articles ----------
 st.markdown("<p style='font-size:22px; font-weight:700;'>🏆 Top articles (par CA TTC)</p>", unsafe_allow_html=True)
 topn = st.slider(label="", min_value=5, max_value=50, value=15, step=5, label_visibility="collapsed")
+
 top_articles = (df.groupby(["code_article","libelle_article"], as_index=False)
                   .agg(qte=("qte","sum"), ca_ttc=("ventes_ttc","sum")))
 top_articles = top_articles.sort_values("ca_ttc", ascending=False).head(topn)

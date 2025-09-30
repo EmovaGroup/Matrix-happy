@@ -3,3 +3,5 @@ pandas>=2.2
 python-dotenv>=1.0
 supabase>=2.6
 altair>=5.3
+streamlit-authenticator
+bcrypt
