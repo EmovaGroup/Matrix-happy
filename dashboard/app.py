@@ -86,7 +86,6 @@ def load_filters():
     r1 = supabase.table("v_matrix").select("period_date").order("period_date", desc=False).limit(1).execute()
     r2 = supabase.table("v_matrix").select("period_date").order("period_date", desc=True).limit(1).execute()
 
-    # ✅ ordre STABLE pour la pagination
     table = (
         supabase.table("v_matrix")
         .select("store_name")
@@ -119,7 +118,6 @@ if dmin is None:
 # ---------- Chargement des données ----------
 @st.cache_data(ttl=300)
 def load_data(dstart: date, dend: date) -> pd.DataFrame:
-    # ✅ ordres STABLES avant pagination pour éviter les “lignes perdues”
     table = (
         supabase.table("v_matrix")
         .select("store_name,period_date,code_article,libelle_final,famille_finale,qte,ventes_ht,ventes_ttc,marge_ht,marge_pct")
@@ -311,6 +309,153 @@ bar = alt.Chart(top_articles).mark_bar().encode(
     tooltip=["code_article", "libelle_final", "qte", "ca_ttc"]
 ).properties(height=max(280, 28*len(top_articles)))
 st.altair_chart(bar, use_container_width=True)
+
+# ---------- Synthèse Tickets & CA TTC ----------
+st.markdown("## 📊 Synthèse Tickets & CA TTC")
+
+JOURS = ["Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi","Dimanche"]
+JOURS_MAP = {0:"Lundi",1:"Mardi",2:"Mercredi",3:"Jeudi",4:"Vendredi",5:"Samedi",6:"Dimanche"}
+
+# Injecter le CSS une seule fois
+st.markdown("""
+<style>
+.scrollable-table {
+    overflow-x: auto;
+    max-width: 100%;
+}
+.scrollable-table table {
+    border-collapse: collapse;
+    width: 100%;
+}
+.scrollable-table thead th {
+    position: sticky;
+    top: 0;
+    background: #f1f1f1;
+    z-index: 3;
+    text-align: center;
+    white-space: nowrap;
+}
+.scrollable-table thead th:first-child,
+.scrollable-table tbody td:first-child {
+    position: sticky;
+    left: 0;
+    background: #e6e6e6;
+    z-index: 5;
+    min-width: 90px;
+    border-right: 2px solid #ccc;
+    font-weight: bold;
+}
+.scrollable-table thead th:last-child,
+.scrollable-table tbody td:last-child {
+    position: sticky;
+    right: 0;
+    background: #e6e6e6;
+    z-index: 5;
+    min-width: 100px;
+    border-left: 2px solid #ccc;
+    font-weight: bold;
+}
+.scrollable-table tbody td {
+    padding: 4px 8px;
+    text-align: center;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# --- Fonction formatage cellule (couleur + flèche) ---
+def format_cell(val, mean, euro=False):
+    if pd.isna(val):
+        return ""
+    try:
+        num_val = float(val)
+    except Exception:
+        return str(val)
+
+    if num_val > mean:
+        color, arrow = "#d4edda", "▲"
+    elif num_val < mean:
+        color, arrow = "#f8d7da", "▼"
+    else:
+        color, arrow = "#fff3cd", "━"
+
+    if euro:
+        text = f"{num_val:,.0f} €".replace(",", " ").replace(".", ",")
+    else:
+        text = f"{int(round(num_val))}"
+
+    return f"<div style='background-color:{color}; padding:4px; border-radius:6px; text-align:center;'>{text} {arrow}</div>"
+
+# --- Fonction utilitaire pour affichage tableau ---
+def render_table(df, euro=False):
+    fmt = df.copy().astype(object)
+    for idx in df.index:
+        base = df.loc[idx, "Moyenne"]
+        for col in df.columns:
+            if col == "Jour":
+                fmt.loc[idx, col] = df.loc[idx, col]
+            elif col == "Moyenne":
+                # 👉 arrondi à 2 décimales
+                if euro:
+                    fmt.loc[idx, col] = f"{df.loc[idx, col]:,.2f} €".replace(",", " ").replace(".", ",")
+                else:
+                    fmt.loc[idx, col] = f"{df.loc[idx, col]:.2f}"
+            else:
+                fmt.loc[idx, col] = format_cell(df.loc[idx, col], base, euro=euro)
+
+    html_table = fmt.to_html(escape=False, index=False, border=0)
+    return f"<div class='scrollable-table'>{html_table}</div>"
+
+# --- Fonction pour export CSV ---
+def get_csv_download_link(df, filename):
+    csv = df.to_csv(index=False, sep=";", encoding="utf-8")
+    return st.download_button(
+        label=f"📥 Télécharger {filename}",
+        data=csv,
+        file_name=f"{filename}.csv",
+        mime="text/csv"
+    )
+
+# --- Tickets ---
+tickets = df.assign(
+    semaine=df["period_date"].dt.isocalendar().week.astype(int),
+    jour=df["period_date"].dt.weekday.map(JOURS_MAP)
+).groupby(["jour","semaine"])["code_article"].count().unstack().reindex(JOURS)
+
+tickets.columns.name = None
+tickets = tickets.rename(columns=lambda c: f"Semaine {c}" if str(c).isdigit() else c)
+week_cols = list(tickets.columns)
+tickets.insert(0, "Jour", tickets.index)
+tickets["Moyenne"] = tickets[week_cols].mean(axis=1)
+
+totals_row_t = tickets[week_cols].sum()
+totals_row_t["Jour"] = "TOTAL"
+totals_row_t["Moyenne"] = totals_row_t[week_cols].mean()
+tickets = pd.concat([tickets, totals_row_t.to_frame().T], ignore_index=True)
+
+st.markdown("### 🎟️ Tickets")
+st.markdown(render_table(tickets, euro=False), unsafe_allow_html=True)
+get_csv_download_link(tickets, "tickets")
+
+# --- CA TTC ---
+ca = df.assign(
+    semaine=df["period_date"].dt.isocalendar().week.astype(int),
+    jour=df["period_date"].dt.weekday.map(JOURS_MAP)
+).groupby(["jour","semaine"])["ventes_ttc"].sum().unstack().reindex(JOURS)
+
+ca.columns.name = None
+ca = ca.rename(columns=lambda c: f"Semaine {c}" if str(c).isdigit() else c)
+week_cols_ca = list(ca.columns)
+ca.insert(0, "Jour", ca.index)
+ca["Moyenne"] = ca[week_cols_ca].mean(axis=1)
+
+totals_row_c = ca[week_cols_ca].sum()
+totals_row_c["Jour"] = "TOTAL"
+totals_row_c["Moyenne"] = totals_row_c[week_cols_ca].mean()
+ca = pd.concat([ca, totals_row_c.to_frame().T], ignore_index=True)
+
+st.markdown("### 💶 CA TTC")
+st.markdown(render_table(ca, euro=True), unsafe_allow_html=True)
+get_csv_download_link(ca, "ca_ttc")
 
 # ---------- Table détaillée ----------
 st.markdown("<p style='font-size:22px; font-weight:700;'>📋 Détail des lignes (période sélectionnée)</p>", unsafe_allow_html=True)
