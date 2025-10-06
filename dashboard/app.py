@@ -108,14 +108,24 @@ def derive_family_from_label(label: str) -> str:
 def load_filters():
     r1 = supabase.table("matrix_lignes").select("period_date").order("period_date", desc=False).limit(1).execute()
     r2 = supabase.table("matrix_lignes").select("period_date").order("period_date", desc=True).limit(1).execute()
-    r3 = supabase.table("matrix_lignes").select("store_name").neq("store_name", "").execute()
+
+    table = supabase.table("matrix_lignes").select("store_name").neq("store_name", "")
+    batch_size = 1000
+    offset = 0
+    all_stores = []
+    while True:
+        res = table.range(offset, offset + batch_size - 1).execute()
+        if not res.data:
+            break
+        all_stores.extend(res.data)
+        offset += batch_size
 
     if not r1.data or not r2.data:
         return None, None, []
 
     dmin = pd.to_datetime(r1.data[0]["period_date"]).date()
     dmax = pd.to_datetime(r2.data[0]["period_date"]).date()
-    stores = sorted({row["store_name"] for row in r3.data if row.get("store_name")})
+    stores = sorted({row["store_name"] for row in all_stores if row.get("store_name")})
     return dmin, dmax, stores
 
 dmin, dmax, stores = load_filters()
@@ -123,67 +133,53 @@ if dmin is None:
     st.warning("Aucune donnée dans matrix_lignes.")
     st.stop()
 
-# ---------- Chargement des données selon filtres ----------
+# ---------- Chargement des données ----------
 @st.cache_data(ttl=300)
 def load_data(dstart: date, dend: date) -> pd.DataFrame:
-    q = supabase.table("matrix_lignes").select(
+    table = supabase.table("matrix_lignes").select(
         "store_name,period_date,code_article,libelle_article,qte,ventes_ht,ventes_ttc,marge_ht,marge_pct"
     ).gte("period_date", dstart.isoformat()).lte("period_date", dend.isoformat())
 
-    res = q.execute()
-    df = pd.DataFrame(res.data or [])
+    batch_size = 1000
+    offset = 0
+    all_data = []
+    while True:
+        res = table.range(offset, offset + batch_size - 1).execute()
+        if not res.data:
+            break
+        all_data.extend(res.data)
+        offset += batch_size
+
+    df = pd.DataFrame(all_data or [])
     if not df.empty:
         df["period_date"] = pd.to_datetime(df["period_date"])
         num_cols = ["qte","ventes_ht","ventes_ttc","marge_ht","marge_pct"]
         for c in num_cols:
             if c in df.columns:
                 df[c] = pd.to_numeric(df[c], errors="coerce")
-        # famille pour le camembert
         df["famille"] = df["libelle_article"].apply(derive_family_from_label)
     return df
 
 # ---------- UI Filtres ----------
 col_filters = st.columns([2, 2, 3])
-
 with col_filters[0]:
     st.markdown("<p style='font-size:18px; font-weight:600; margin-bottom:-8px;'>📅 Période</p>", unsafe_allow_html=True)
-    drange = st.date_input(
-        label="",
-        value=(dmin, dmax),
-        min_value=dmin,
-        max_value=dmax,
-        label_visibility="collapsed"
-    )
-
-# Gestion robuste de la période choisie
+    drange = st.date_input("", value=(dmin, dmax), min_value=dmin, max_value=dmax, label_visibility="collapsed")
 if isinstance(drange, tuple) and len(drange) == 2:
     dstart, dend = drange
-elif hasattr(drange, "year"):  # si une seule date est choisie
+elif hasattr(drange, "year"):
     dstart, dend = drange, drange
 else:
-    st.error("⚠️ Sélection de période invalide. Veuillez choisir une ou deux dates.")
     st.stop()
 
 with col_filters[1]:
     st.markdown("<p style='font-size:18px; font-weight:600; margin-bottom:-8px;'>⏱️ Granularité</p>", unsafe_allow_html=True)
-    granularity = st.radio(
-        label="",
-        options=["Jour", "Semaine", "Mois"],
-        horizontal=True,
-        label_visibility="collapsed"
-    )
-
+    granularity = st.radio("", ["Jour", "Semaine", "Mois"], horizontal=True, label_visibility="collapsed")
 with col_filters[2]:
     st.markdown("<p style='font-size:18px; font-weight:600; margin-bottom:-8px;'>🏬 Magasins à comparer</p>", unsafe_allow_html=True)
     store_options = ["Tous les magasins"] + stores
-    selected_stores = st.multiselect(
-        label="",
-        options=store_options,
-        default=["Tous les magasins"],
-        label_visibility="collapsed"
-    )
+    selected_stores = st.multiselect("", store_options, default=["Tous les magasins"], label_visibility="collapsed")
 
-# ⚡ Bouton
 if st.button("⚡ Charger / Actualiser les données", type="primary"):
     st.session_state["stores_selected"] = selected_stores
     st.session_state["df"] = load_data(dstart, dend)
@@ -193,18 +189,15 @@ st.caption("Astuce : choisis 📅 la période, ⏱️ la granularité et 🏬 le
 # ---------- Récupération ----------
 df = st.session_state.get("df")
 stores_selected = st.session_state.get("stores_selected", [])
-
 if df is None:
     st.info("Clique sur ⚡ Charger / Actualiser les données pour afficher le dashboard.")
     st.stop()
-
 if df.empty:
     st.warning("Aucune ligne pour ces filtres.")
     st.stop()
 
 # ---------- KPIs ----------
 col1, col2, col3, col4 = st.columns(4)
-
 def kpi_card(title, value, emoji):
     return f"""
     <div style="border: 3px solid red; border-radius: 12px; padding: 20px; text-align: center;
@@ -218,7 +211,6 @@ def kpi_card(title, value, emoji):
         </div>
     </div>
     """
-
 with col1:
     st.markdown(kpi_card("CA TTC", f"{df['ventes_ttc'].sum():,.2f} €".replace(",", " ").replace(".", ","), "💰"), unsafe_allow_html=True)
 with col2:
@@ -236,14 +228,18 @@ def aggregate(df_in: pd.DataFrame, granularity: str, by_store=True) -> pd.DataFr
     dfg = df_in.copy()
     if granularity == "Jour":
         dfg["bucket"] = dfg["period_date"].dt.date
+        dfg["bucket_label"] = dfg["bucket"].astype(str)
     elif granularity == "Semaine":
-        dfg["bucket"] = dfg["period_date"] - pd.to_timedelta(dfg["period_date"].dt.weekday, unit="D")
-        dfg["bucket"] = dfg["bucket"].dt.date
-    else:
+        # Lundi -> Dimanche
+        dfg["bucket_start"] = dfg["period_date"] - pd.to_timedelta(dfg["period_date"].dt.weekday, unit="D")
+        dfg["bucket_end"] = dfg["bucket_start"] + pd.to_timedelta(6, unit="D")
+        dfg["bucket"] = dfg["bucket_start"]
+        dfg["bucket_label"] = "du " + dfg["bucket_start"].dt.strftime("%d/%m/%Y") + " au " + dfg["bucket_end"].dt.strftime("%d/%m/%Y")
+    else:  # Mois
         dfg["bucket"] = dfg["period_date"].dt.to_period("M").dt.to_timestamp()
-        dfg["bucket"] = dfg["bucket"].dt.date
+        dfg["bucket_label"] = dfg["bucket"].dt.strftime("%b %Y")
 
-    group_cols = ["bucket"]
+    group_cols = ["bucket", "bucket_label"]
     if by_store:
         group_cols.insert(0, "store_name")
 
@@ -260,21 +256,19 @@ if stores_selected:
         agg_all = aggregate(df, granularity, by_store=False)
         agg_all["magasin"] = "Tous les magasins"
         comp_list.append(agg_all)
-
     for store in [s for s in stores_selected if s != "Tous les magasins"]:
         df_store = df[df["store_name"] == store]
         agg_store = aggregate(df_store, granularity, by_store=True)
         agg_store["magasin"] = store
         comp_list.append(agg_store)
-
     comp = pd.concat(comp_list, ignore_index=True)
 
     st.markdown(f"<p style='font-size:22px; font-weight:700;'>📈 Comparaison des magasins — CA TTC ({granularity})</p>", unsafe_allow_html=True)
     line_comp = alt.Chart(comp).mark_line(point=True).encode(
-        x=alt.X("bucket:T", title=f"Période ({granularity})"),
+        x=alt.X("bucket_label:N", title=f"Période ({granularity})", sort=None),
         y=alt.Y("ca_ttc:Q", title="CA TTC"),
         color=alt.Color("magasin:N", title="Magasin"),
-        tooltip=["magasin","bucket:T","ca_ttc:Q","ca_ht:Q","marge:Q","qte:Q"]
+        tooltip=["magasin","bucket_label","ca_ttc","ca_ht","marge","qte"]
     ).properties(height=320)
     st.altair_chart(line_comp, use_container_width=True)
 
@@ -282,14 +276,11 @@ st.divider()
 
 # ---------- Camembert ----------
 st.markdown("<p style='font-size:22px; font-weight:700;'>🥧 Répartition du CA TTC par famille</p>", unsafe_allow_html=True)
-st.markdown("""<style>div[data-baseweb="select"] {border: 1px solid #ccc;border-radius: 6px;padding: 2px;}</style>""", unsafe_allow_html=True)
-
 target_for_pie = st.selectbox(
     "Choisir le magasin pour le camembert",
     options=[f"Tous magasins ({dstart} → {dend})"] + stores_selected,
     index=0
 )
-
 if target_for_pie == f"Tous magasins ({dstart} → {dend})":
     pie_df = df.copy()
 else:
@@ -312,20 +303,32 @@ st.divider()
 st.markdown("<p style='font-size:22px; font-weight:700;'>🏆 Top articles (par CA TTC)</p>", unsafe_allow_html=True)
 topn = st.slider(label="", min_value=5, max_value=50, value=15, step=5, label_visibility="collapsed")
 
-top_articles = (df.groupby(["code_article","libelle_article"], as_index=False)
-                  .agg(qte=("qte","sum"), ca_ttc=("ventes_ttc","sum")))
+# Optionnel : filtrer par magasins sélectionnés (sauf si "Tous les magasins")
+df_for_top = df.copy()
+if stores_selected and "Tous les magasins" not in stores_selected:
+    df_for_top = df_for_top[df_for_top["store_name"].isin(stores_selected)]
+
+top_articles = (df_for_top.groupby(["code_article", "libelle_article"], as_index=False)
+                .agg(qte=("qte", "sum"),
+                     ca_ttc=("ventes_ttc", "sum")))
+# Libellé unique pour éviter les fusions de barres avec le même nom d'article
+top_articles["article"] = top_articles.apply(
+    lambda r: f"{r['libelle_article']} [{r['code_article']}]",
+    axis=1
+)
+
 top_articles = top_articles.sort_values("ca_ttc", ascending=False).head(topn)
 
 bar = alt.Chart(top_articles).mark_bar().encode(
     x=alt.X("ca_ttc:Q", title="CA TTC"),
-    y=alt.Y("libelle_article:N", sort="-x", title="Article"),
-    tooltip=["code_article","libelle_article","qte","ca_ttc"]
-).properties(height=28*topn)
+    y=alt.Y("article:N", sort="-x", title="Article"),
+    tooltip=["code_article", "libelle_article", "qte", "ca_ttc"]
+).properties(height=max(280, 28*len(top_articles)))
 st.altair_chart(bar, use_container_width=True)
 
 # ---------- Table détaillée ----------
 st.markdown("<p style='font-size:22px; font-weight:700;'>📋 Détail des lignes (période sélectionnée)</p>", unsafe_allow_html=True)
 st.dataframe(
-    df.sort_values(["period_date","store_name","libelle_article"]),
+    df.sort_values(["period_date", "store_name", "libelle_article"]),
     use_container_width=True
 )
