@@ -80,36 +80,19 @@ st.markdown(
 # ---------- Dashboard ----------
 st.title("📊 Matrix — Ventes & Marge")
 
-# ---------- Aide : dériver une "famille" depuis le libellé ----------
-FAMILY_RULES = [
-    ("Bouquet", "Bouquets"),
-    ("Autre bouquet", "Bouquets"),
-    ("Roses", "Roses"),
-    ("Rose", "Roses"),
-    ("Orchid", "Orchidées"),
-    ("Plante", "Plantes"),
-    ("Fleurs", "Fleurs"),
-    ("Fleur", "Fleurs"),
-    ("Composition", "Compositions"),
-]
-DEFAULT_FAMILY = "Autres"
-
-def derive_family_from_label(label: str) -> str:
-    if not isinstance(label, str):
-        return DEFAULT_FAMILY
-    L = label.lower()
-    for pattern, family in FAMILY_RULES:
-        if pattern.lower() in L:
-            return family
-    return DEFAULT_FAMILY
-
 # ---------- Chargement des filtres de base ----------
 @st.cache_data(ttl=300)
 def load_filters():
-    r1 = supabase.table("matrix_lignes").select("period_date").order("period_date", desc=False).limit(1).execute()
-    r2 = supabase.table("matrix_lignes").select("period_date").order("period_date", desc=True).limit(1).execute()
+    r1 = supabase.table("v_matrix").select("period_date").order("period_date", desc=False).limit(1).execute()
+    r2 = supabase.table("v_matrix").select("period_date").order("period_date", desc=True).limit(1).execute()
 
-    table = supabase.table("matrix_lignes").select("store_name").neq("store_name", "")
+    # ✅ ordre STABLE pour la pagination
+    table = (
+        supabase.table("v_matrix")
+        .select("store_name")
+        .neq("store_name", "")
+        .order("store_name", desc=False)
+    )
     batch_size = 1000
     offset = 0
     all_stores = []
@@ -130,15 +113,22 @@ def load_filters():
 
 dmin, dmax, stores = load_filters()
 if dmin is None:
-    st.warning("Aucune donnée dans matrix_lignes.")
+    st.warning("Aucune donnée dans v_matrix.")
     st.stop()
 
 # ---------- Chargement des données ----------
 @st.cache_data(ttl=300)
 def load_data(dstart: date, dend: date) -> pd.DataFrame:
-    table = supabase.table("matrix_lignes").select(
-        "store_name,period_date,code_article,libelle_article,qte,ventes_ht,ventes_ttc,marge_ht,marge_pct"
-    ).gte("period_date", dstart.isoformat()).lte("period_date", dend.isoformat())
+    # ✅ ordres STABLES avant pagination pour éviter les “lignes perdues”
+    table = (
+        supabase.table("v_matrix")
+        .select("store_name,period_date,code_article,libelle_final,famille_finale,qte,ventes_ht,ventes_ttc,marge_ht,marge_pct")
+        .gte("period_date", dstart.isoformat())
+        .lte("period_date", dend.isoformat())
+        .order("period_date", desc=False)
+        .order("store_name", desc=False)
+        .order("code_article", desc=False)
+    )
 
     batch_size = 1000
     offset = 0
@@ -157,7 +147,6 @@ def load_data(dstart: date, dend: date) -> pd.DataFrame:
         for c in num_cols:
             if c in df.columns:
                 df[c] = pd.to_numeric(df[c], errors="coerce")
-        df["famille"] = df["libelle_article"].apply(derive_family_from_label)
     return df
 
 # ---------- UI Filtres ----------
@@ -230,7 +219,6 @@ def aggregate(df_in: pd.DataFrame, granularity: str, by_store=True) -> pd.DataFr
         dfg["bucket"] = dfg["period_date"].dt.date
         dfg["bucket_label"] = dfg["bucket"].astype(str)
     elif granularity == "Semaine":
-        # Lundi -> Dimanche
         dfg["bucket_start"] = dfg["period_date"] - pd.to_timedelta(dfg["period_date"].dt.weekday, unit="D")
         dfg["bucket_end"] = dfg["bucket_start"] + pd.to_timedelta(6, unit="D")
         dfg["bucket"] = dfg["bucket_start"]
@@ -286,14 +274,14 @@ if target_for_pie == f"Tous magasins ({dstart} → {dend})":
 else:
     pie_df = df[df["store_name"] == target_for_pie].copy()
 
-fam = (pie_df.groupby("famille", as_index=False)
+fam = (pie_df.groupby("famille_finale", as_index=False)
               .agg(ca_ttc=("ventes_ttc", "sum")))
 fam["pct"] = fam["ca_ttc"] / fam["ca_ttc"].sum() * 100 if fam["ca_ttc"].sum() else 0
 
 pie = alt.Chart(fam).mark_arc().encode(
     theta=alt.Theta(field="ca_ttc", type="quantitative", title="CA TTC"),
-    color=alt.Color(field="famille", type="nominal", title="Famille"),
-    tooltip=["famille","ca_ttc","pct"]
+    color=alt.Color(field="famille_finale", type="nominal", title="Famille"),
+    tooltip=["famille_finale","ca_ttc","pct"]
 ).properties(height=360)
 st.altair_chart(pie, use_container_width=True)
 
@@ -303,17 +291,15 @@ st.divider()
 st.markdown("<p style='font-size:22px; font-weight:700;'>🏆 Top articles (par CA TTC)</p>", unsafe_allow_html=True)
 topn = st.slider(label="", min_value=5, max_value=50, value=15, step=5, label_visibility="collapsed")
 
-# Optionnel : filtrer par magasins sélectionnés (sauf si "Tous les magasins")
 df_for_top = df.copy()
 if stores_selected and "Tous les magasins" not in stores_selected:
     df_for_top = df_for_top[df_for_top["store_name"].isin(stores_selected)]
 
-top_articles = (df_for_top.groupby(["code_article", "libelle_article"], as_index=False)
+top_articles = (df_for_top.groupby(["code_article", "libelle_final"], as_index=False)
                 .agg(qte=("qte", "sum"),
                      ca_ttc=("ventes_ttc", "sum")))
-# Libellé unique pour éviter les fusions de barres avec le même nom d'article
 top_articles["article"] = top_articles.apply(
-    lambda r: f"{r['libelle_article']} [{r['code_article']}]",
+    lambda r: f"{r['libelle_final']} [{r['code_article']}]",
     axis=1
 )
 
@@ -322,13 +308,13 @@ top_articles = top_articles.sort_values("ca_ttc", ascending=False).head(topn)
 bar = alt.Chart(top_articles).mark_bar().encode(
     x=alt.X("ca_ttc:Q", title="CA TTC"),
     y=alt.Y("article:N", sort="-x", title="Article"),
-    tooltip=["code_article", "libelle_article", "qte", "ca_ttc"]
+    tooltip=["code_article", "libelle_final", "qte", "ca_ttc"]
 ).properties(height=max(280, 28*len(top_articles)))
 st.altair_chart(bar, use_container_width=True)
 
 # ---------- Table détaillée ----------
 st.markdown("<p style='font-size:22px; font-weight:700;'>📋 Détail des lignes (période sélectionnée)</p>", unsafe_allow_html=True)
 st.dataframe(
-    df.sort_values(["period_date", "store_name", "libelle_article"]),
+    df.sort_values(["period_date", "store_name", "libelle_final"]),
     use_container_width=True
 )
