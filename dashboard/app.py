@@ -29,6 +29,10 @@ ALLOWED = {
     "d.decarriere@emova-group.com",
     "dsi@emova-group.com",
     "sa.ouni@emova-group.com",
+    "n.dubois@emova-group.com",
+    "s.maslaga@emova-group.com",
+    "ym.gille@emova-group.com",
+
 }
 
 # ---------- Auth ----------
@@ -66,7 +70,10 @@ USER_NAMES = {
     "sa.ouni@emova-group.com": "Salah Ouni",
     "o.ginoux@emova-group.com": "Olivier Ginoux",
     "d.decarriere@emova-group.com": "David Decarrière",
-    "dsi@emova-group.com": "DSI"
+    "dsi@emova-group.com": "DSI",
+    "n.dubois@emova-group.com": "Nicolas Dubois",
+    "s.maslaga@emova-group.com": "Saloua Maslaga",
+    "ym.gille@emova-group.com": "Yves-Marie Gille"
 }
 
 email = user.email.lower()
