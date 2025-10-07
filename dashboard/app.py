@@ -473,6 +473,59 @@ st.markdown("### 💶 CA TTC")
 st.markdown(render_table(ca, euro=True), unsafe_allow_html=True)
 get_csv_download_link(ca, "ca_ttc")
 
+# ---------- Courbes Tickets & CA TTC par semaine ----------
+st.markdown("## 📈 Évolution par semaine (Tickets & CA TTC)")
+
+# Tickets long format
+tickets_long = (
+    df.assign(
+        semaine=df["period_date"].dt.isocalendar().week.astype(int),
+        jour=df["period_date"].dt.weekday.map(JOURS_MAP)
+    )
+    .groupby(["semaine","jour"])["code_article"].count()
+    .reset_index()
+    .rename(columns={"code_article":"Tickets"})
+)
+
+st.markdown("### 🎟️ Tickets")
+chart_tickets = (
+    alt.Chart(tickets_long)
+    .mark_line(point=True)
+    .encode(
+        x=alt.X("jour:N", sort=JOURS, title="Jour"),
+        y=alt.Y("Tickets:Q", title="Tickets"),
+        color=alt.Color("semaine:N", title="Semaine"),
+        tooltip=["semaine","jour","Tickets"]
+    )
+    .properties(width=800, height=400)
+)
+st.altair_chart(chart_tickets, use_container_width=True)
+
+# CA TTC long format
+ca_long = (
+    df.assign(
+        semaine=df["period_date"].dt.isocalendar().week.astype(int),
+        jour=df["period_date"].dt.weekday.map(JOURS_MAP)
+    )
+    .groupby(["semaine","jour"])["ventes_ttc"].sum()
+    .reset_index()
+    .rename(columns={"ventes_ttc":"CA_TTC"})
+)
+
+st.markdown("### 💶 CA TTC")
+chart_ca = (
+    alt.Chart(ca_long)
+    .mark_line(point=True)
+    .encode(
+        x=alt.X("jour:N", sort=JOURS, title="Jour"),
+        y=alt.Y("CA_TTC:Q", title="CA TTC"),
+        color=alt.Color("semaine:N", title="Semaine"),
+        tooltip=["semaine","jour","CA_TTC"]
+    )
+    .properties(width=800, height=400)
+)
+st.altair_chart(chart_ca, use_container_width=True)
+
 # ---------- Table détaillée ----------
 st.markdown("<p style='font-size:22px; font-weight:700;'>📋 Détail des lignes (période sélectionnée)</p>", unsafe_allow_html=True)
 st.dataframe(
