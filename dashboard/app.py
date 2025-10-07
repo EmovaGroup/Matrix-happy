@@ -401,7 +401,6 @@ def render_table(df, euro=False):
             if col == "Jour":
                 fmt.loc[idx, col] = df.loc[idx, col]
             elif col == "Moyenne":
-                # 👉 arrondi à 2 décimales
                 if euro:
                     fmt.loc[idx, col] = f"{df.loc[idx, col]:,.2f} €".replace(",", " ").replace(".", ",")
                 else:
@@ -430,10 +429,15 @@ tickets = df.assign(
 
 tickets.columns.name = None
 tickets = tickets.rename(columns=lambda c: f"Semaine {c}" if str(c).isdigit() else c)
-week_cols = list(tickets.columns)
+
+# Colonnes inversées (plus récentes → plus anciennes)
+week_cols = list(tickets.columns)[::-1]
+tickets = tickets[week_cols]
+
 tickets.insert(0, "Jour", tickets.index)
 tickets["Moyenne"] = tickets[week_cols].mean(axis=1)
 
+# Ligne TOTAL corrigée
 totals_row_t = tickets[week_cols].sum()
 totals_row_t["Jour"] = "TOTAL"
 totals_row_t["Moyenne"] = totals_row_t[week_cols].mean()
@@ -451,10 +455,15 @@ ca = df.assign(
 
 ca.columns.name = None
 ca = ca.rename(columns=lambda c: f"Semaine {c}" if str(c).isdigit() else c)
-week_cols_ca = list(ca.columns)
+
+# Colonnes inversées (plus récentes → plus anciennes)
+week_cols_ca = list(ca.columns)[::-1]
+ca = ca[week_cols_ca]
+
 ca.insert(0, "Jour", ca.index)
 ca["Moyenne"] = ca[week_cols_ca].mean(axis=1)
 
+# Ligne TOTAL corrigée
 totals_row_c = ca[week_cols_ca].sum()
 totals_row_c["Jour"] = "TOTAL"
 totals_row_c["Moyenne"] = totals_row_c[week_cols_ca].mean()
