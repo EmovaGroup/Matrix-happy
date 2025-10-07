@@ -1,6 +1,8 @@
 [theme]
-primaryColor="#1F7A8C"
-backgroundColor="#FFFFFF"
-secondaryBackgroundColor="#F5F7FA"
-textColor="#1B263B"
+# --- Mode clair ---
+primaryColor="#1F7A8C"         # bleu Monceau
+backgroundColor="#FFFFFF"      # fond principal blanc
+secondaryBackgroundColor="#F5F7FA"  # gris très clair
+textColor="#1B263B"            # bleu nuit pour texte
 font="sans serif"
+base="light"

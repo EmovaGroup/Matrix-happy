@@ -23,6 +23,41 @@ supabase = get_client()
 
 st.set_page_config(page_title="Matrix Dashboard", layout="wide")
 
+# 👉 À coller juste après st.set_page_config(...)
+st.markdown("""
+<style>
+/* === Boutons uniquement (bleu Manceau) === */
+div.stButton > button,
+div.stDownloadButton > button,
+.stForm button[type="submit"],
+button[kind="primary"],
+button[kind="secondary"] {
+    background-color: #1F7A8C !important;
+    color: #FFFFFF !important;
+    border: none !important;
+    border-radius: 6px !important;
+    box-shadow: none !important;
+}
+div.stButton > button:hover,
+div.stDownloadButton > button:hover,
+.stForm button[type="submit"]:hover,
+button[kind="primary"]:hover,
+button[kind="secondary"]:hover {
+    background-color: #166272 !important;
+    color: #FFFFFF !important;
+}
+/* Focus accessible (optionnel) */
+div.stButton > button:focus,
+div.stDownloadButton > button:focus,
+.stForm button[type="submit"]:focus,
+button[kind="primary"]:focus,
+button[kind="secondary"]:focus {
+    outline: 2px solid #1F7A8C !important;
+    outline-offset: 2px !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # ---------- Utilisateurs autorisés ----------
 ALLOWED = {
     "o.ginoux@emova-group.com",
@@ -32,7 +67,6 @@ ALLOWED = {
     "n.dubois@emova-group.com",
     "s.maslaga@emova-group.com",
     "ym.gille@emova-group.com",
-
 }
 
 # ---------- Auth ----------
@@ -216,7 +250,6 @@ with col4:
     st.markdown(kpi_card("Marge %", f"{pct:,.2f} %".replace(",", " ").replace(".", ","), "🔥"), unsafe_allow_html=True)
 
 st.divider()
-
 # ---------- Courbe comparative ----------
 def aggregate(df_in: pd.DataFrame, granularity: str, by_store=True) -> pd.DataFrame:
     dfg = df_in.copy()
@@ -258,11 +291,15 @@ if stores_selected:
 
     st.markdown(f"<p style='font-size:22px; font-weight:700;'>📈 Comparaison des magasins — CA TTC ({granularity})</p>", unsafe_allow_html=True)
     line_comp = alt.Chart(comp).mark_line(point=True).encode(
-        x=alt.X("bucket_label:N", title=f"Période ({granularity})", sort=None),
-        y=alt.Y("ca_ttc:Q", title="CA TTC"),
-        color=alt.Color("magasin:N", title="Magasin"),
-        tooltip=["magasin","bucket_label","ca_ttc","ca_ht","marge","qte"]
-    ).properties(height=320)
+    x=alt.X("bucket_label:N", title=f"Période ({granularity})", sort=None),
+    y=alt.Y("ca_ttc:Q", title="CA TTC"),
+    color=alt.Color("magasin:N", title="Magasin", scale=alt.Scale(scheme="category20")),  # ✅ category20
+    tooltip=["magasin","bucket_label",
+             alt.Tooltip("ca_ttc:Q", format=".2f"),
+             alt.Tooltip("ca_ht:Q", format=".2f"),
+             alt.Tooltip("marge:Q", format=".2f"),
+             alt.Tooltip("qte:Q", format=".0f")]
+    ).properties(height=320).configure_mark(strokeWidth=3)
     st.altair_chart(line_comp, use_container_width=True)
 
 st.divider()
@@ -285,8 +322,10 @@ fam["pct"] = fam["ca_ttc"] / fam["ca_ttc"].sum() * 100 if fam["ca_ttc"].sum() el
 
 pie = alt.Chart(fam).mark_arc().encode(
     theta=alt.Theta(field="ca_ttc", type="quantitative", title="CA TTC"),
-    color=alt.Color(field="famille_finale", type="nominal", title="Famille"),
-    tooltip=["famille_finale","ca_ttc","pct"]
+    color=alt.Color(field="famille_finale", type="nominal", title="Famille", scale=alt.Scale(scheme="category20")),  # ✅ category20
+    tooltip=["famille_finale",
+             alt.Tooltip("ca_ttc:Q", format=".2f"),
+             alt.Tooltip("pct:Q", format=".1f")]
 ).properties(height=360)
 st.altair_chart(pie, use_container_width=True)
 
@@ -323,53 +362,91 @@ st.markdown("## 📊 Synthèse Tickets & CA TTC")
 JOURS = ["Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi","Dimanche"]
 JOURS_MAP = {0:"Lundi",1:"Mardi",2:"Mercredi",3:"Jeudi",4:"Vendredi",5:"Samedi",6:"Dimanche"}
 
-# Injecter le CSS une seule fois
-st.markdown("""
+# Détecter thème actif
+theme_base = st.get_option("theme.base")  # "light" ou "dark"
+
+if theme_base == "dark":
+    table_bg = "#1e1e1e"
+    sticky_bg = "#2b2b2b"
+    header_bg = "#3a3a3a"
+    text_color = "#f5f5f5"
+    color_above = "#234d20"
+    color_below = "#5c1a1a"
+    color_equal = "#444444"
+else:
+    table_bg = "#ffffff"
+    sticky_bg = "#f2f2f2"
+    header_bg = sticky_bg
+    text_color = "#000000"
+    color_above = "#d4edda"
+    color_below = "#f8d7da"
+    color_equal = "#fff3cd"
+
+# Injecter CSS dynamique
+st.markdown(f"""
 <style>
-.scrollable-table {
+.scrollable-table {{
     overflow-x: auto;
     max-width: 100%;
-}
-.scrollable-table table {
+}}
+.scrollable-table table {{
     border-collapse: collapse;
     width: 100%;
-}
-.scrollable-table thead th {
-    position: sticky;
-    top: 0;
-    background: #f1f1f1;
-    z-index: 3;
+    background-color: transparent !important;
+}}
+.scrollable-table thead th,
+.scrollable-table tbody td {{
+    color: {text_color};
     text-align: center;
     white-space: nowrap;
-}
+}}
+.scrollable-table thead th {{
+    position: sticky;
+    top: 0;
+    background: {header_bg} !important;
+    color: {text_color} !important;
+    z-index: 3;
+    font-weight: bold;
+    border-radius: 8px;   /* ✅ arrondi uniforme */
+    padding: 6px 12px;    /* ✅ même hauteur que les valeurs */
+}}
 .scrollable-table thead th:first-child,
-.scrollable-table tbody td:first-child {
+.scrollable-table tbody td:first-child {{
     position: sticky;
     left: 0;
-    background: #e6e6e6;
+    background: {sticky_bg} !important;
     z-index: 5;
     min-width: 90px;
-    border-right: 2px solid #ccc;
+    border-right: 2px solid #444;
     font-weight: bold;
-}
+    border-radius: 8px;
+}}
 .scrollable-table thead th:last-child,
-.scrollable-table tbody td:last-child {
+.scrollable-table tbody td:last-child {{
     position: sticky;
     right: 0;
-    background: #e6e6e6;
+    background: {sticky_bg} !important;
     z-index: 5;
     min-width: 100px;
-    border-left: 2px solid #ccc;
+    border-left: 2px solid #444;
     font-weight: bold;
-}
-.scrollable-table tbody td {
+    border-radius: 8px;
+}}
+.scrollable-table tbody td {{
     padding: 4px 8px;
     text-align: center;
-}
+}}
+.scrollable-table tbody td div {{
+    border-radius: 8px !important;   /* ✅ capsules arrondies */
+    padding: 6px 12px !important;    /* ✅ cohérence hauteur */
+}}
+body[data-theme="dark"] .scrollable-table tbody td:empty {{
+    background-color: #2b2b2b !important;
+}}
 </style>
 """, unsafe_allow_html=True)
 
-# --- Fonction formatage cellule (couleur + flèche) ---
+# --- Fonction formatage cellule ---
 def format_cell(val, mean, euro=False):
     if pd.isna(val):
         return ""
@@ -379,18 +456,18 @@ def format_cell(val, mean, euro=False):
         return str(val)
 
     if num_val > mean:
-        color, arrow = "#d4edda", "▲"
+        color, arrow = color_above, "▲"
     elif num_val < mean:
-        color, arrow = "#f8d7da", "▼"
+        color, arrow = color_below, "▼"
     else:
-        color, arrow = "#fff3cd", "━"
+        color, arrow = color_equal, "━"
 
     if euro:
         text = f"{num_val:,.0f} €".replace(",", " ").replace(".", ",")
     else:
         text = f"{int(round(num_val))}"
 
-    return f"<div style='background-color:{color}; padding:4px; border-radius:6px; text-align:center;'>{text} {arrow}</div>"
+    return f"<div style='background-color:{color}; border-radius:8px; padding:6px 12px; text-align:center; color:{text_color};'>{text} {arrow}</div>"
 
 # --- Fonction utilitaire pour affichage tableau ---
 def render_table(df, euro=False):
@@ -411,7 +488,7 @@ def render_table(df, euro=False):
     html_table = fmt.to_html(escape=False, index=False, border=0)
     return f"<div class='scrollable-table'>{html_table}</div>"
 
-# --- Fonction pour export CSV ---
+# --- Fonction export CSV ---
 def get_csv_download_link(df, filename):
     csv = df.to_csv(index=False, sep=";", encoding="utf-8")
     return st.download_button(
@@ -430,20 +507,18 @@ tickets = df.assign(
 tickets.columns.name = None
 tickets = tickets.rename(columns=lambda c: f"Semaine {c}" if str(c).isdigit() else c)
 
-# Colonnes inversées (plus récentes → plus anciennes)
 week_cols = list(tickets.columns)[::-1]
 tickets = tickets[week_cols]
 
 tickets.insert(0, "Jour", tickets.index)
 tickets["Moyenne"] = tickets[week_cols].mean(axis=1)
 
-# Ligne TOTAL corrigée
 totals_row_t = tickets[week_cols].sum()
 totals_row_t["Jour"] = "TOTAL"
 totals_row_t["Moyenne"] = totals_row_t[week_cols].mean()
 tickets = pd.concat([tickets, totals_row_t.to_frame().T], ignore_index=True)
 
-st.markdown("### 🎟️ Tickets")
+st.markdown("### 🎟️ Synthèse Tickets par semaine")
 st.markdown(render_table(tickets, euro=False), unsafe_allow_html=True)
 get_csv_download_link(tickets, "tickets")
 
@@ -456,75 +531,123 @@ ca = df.assign(
 ca.columns.name = None
 ca = ca.rename(columns=lambda c: f"Semaine {c}" if str(c).isdigit() else c)
 
-# Colonnes inversées (plus récentes → plus anciennes)
 week_cols_ca = list(ca.columns)[::-1]
 ca = ca[week_cols_ca]
 
 ca.insert(0, "Jour", ca.index)
 ca["Moyenne"] = ca[week_cols_ca].mean(axis=1)
 
-# Ligne TOTAL corrigée
 totals_row_c = ca[week_cols_ca].sum()
 totals_row_c["Jour"] = "TOTAL"
 totals_row_c["Moyenne"] = totals_row_c[week_cols_ca].mean()
 ca = pd.concat([ca, totals_row_c.to_frame().T], ignore_index=True)
 
-st.markdown("### 💶 CA TTC")
+st.markdown("### 💶 Synthèse Ca ttc par semaine")
 st.markdown(render_table(ca, euro=True), unsafe_allow_html=True)
 get_csv_download_link(ca, "ca_ttc")
 
-# ---------- Courbes Tickets & CA TTC par semaine ----------
-st.markdown("## 📈 Évolution par semaine (Tickets & CA TTC)")
+# --- Panier moyen ---
+panier = df.assign(
+    semaine=df["period_date"].dt.isocalendar().week.astype(int),
+    jour=df["period_date"].dt.weekday.map(JOURS_MAP)
+).groupby(["jour","semaine"]).agg(
+    tickets=("code_article", "count"),
+    ca_ttc=("ventes_ttc", "sum")
+).reset_index()
 
-# Tickets long format
-tickets_long = (
-    df.assign(
-        semaine=df["period_date"].dt.isocalendar().week.astype(int),
-        jour=df["period_date"].dt.weekday.map(JOURS_MAP)
-    )
-    .groupby(["semaine","jour"])["code_article"].count()
-    .reset_index()
-    .rename(columns={"code_article":"Tickets"})
-)
+# Calcul du panier moyen = CA / tickets
+panier["panier_moyen"] = panier["ca_ttc"] / panier["tickets"]
 
-st.markdown("### 🎟️ Tickets")
-chart_tickets = (
-    alt.Chart(tickets_long)
-    .mark_line(point=True)
-    .encode(
-        x=alt.X("jour:N", sort=JOURS, title="Jour"),
-        y=alt.Y("Tickets:Q", title="Tickets"),
-        color=alt.Color("semaine:N", title="Semaine"),
-        tooltip=["semaine","jour","Tickets"]
-    )
-    .properties(width=800, height=400)
-)
-st.altair_chart(chart_tickets, use_container_width=True)
+# Pivot table comme les autres
+panier_tab = panier.pivot(index="jour", columns="semaine", values="panier_moyen").reindex(JOURS)
 
-# CA TTC long format
-ca_long = (
-    df.assign(
-        semaine=df["period_date"].dt.isocalendar().week.astype(int),
-        jour=df["period_date"].dt.weekday.map(JOURS_MAP)
-    )
-    .groupby(["semaine","jour"])["ventes_ttc"].sum()
-    .reset_index()
-    .rename(columns={"ventes_ttc":"CA_TTC"})
-)
+panier_tab.columns.name = None
+panier_tab = panier_tab.rename(columns=lambda c: f"Semaine {c}" if str(c).isdigit() else c)
 
-st.markdown("### 💶 CA TTC")
-chart_ca = (
-    alt.Chart(ca_long)
-    .mark_line(point=True)
-    .encode(
-        x=alt.X("jour:N", sort=JOURS, title="Jour"),
-        y=alt.Y("CA_TTC:Q", title="CA TTC"),
-        color=alt.Color("semaine:N", title="Semaine"),
-        tooltip=["semaine","jour","CA_TTC"]
-    )
-    .properties(width=800, height=400)
-)
-st.altair_chart(chart_ca, use_container_width=True)
+week_cols_pm = list(panier_tab.columns)[::-1]
+panier_tab = panier_tab[week_cols_pm]
+
+panier_tab.insert(0, "Jour", panier_tab.index)
+panier_tab["Moyenne"] = panier_tab[week_cols_pm].mean(axis=1)
+
+# Ligne TOTAL
+totals_row_pm = pd.Series(dtype="float64")
+totals_row_pm["Jour"] = "TOTAL"
+totals_row_pm["Moyenne"] = panier_tab[week_cols_pm].mean().mean()
+for col in week_cols_pm:
+    totals_row_pm[col] = panier_tab[col].mean()
+panier_tab = pd.concat([panier_tab, totals_row_pm.to_frame().T], ignore_index=True)
+
+# Affichage
+st.markdown("### 🛒 Synthèse Panier moyen par semaine")
+st.markdown(render_table(panier_tab.round(2), euro=True), unsafe_allow_html=True)
+get_csv_download_link(panier_tab.round(2), "panier_moyen")
+
+# ---------- Graphiques comparatifs par semaine ----------
+
+# Tickets
+st.markdown("### 📈 Évolution des Tickets par semaine")
+tickets_chart = df.assign(
+    semaine=df["period_date"].dt.isocalendar().week.astype(int),
+    jour=df["period_date"].dt.weekday.map(JOURS_MAP)
+).groupby(["semaine","jour"])["code_article"].count().reset_index()
+
+tickets_chart["jour"] = pd.Categorical(tickets_chart["jour"], categories=JOURS, ordered=True)
+
+fig_tickets = alt.Chart(tickets_chart).mark_line(point=alt.OverlayMarkDef(size=70)).encode(
+    x=alt.X("jour", sort=JOURS, title="Jour de la semaine"),
+    y=alt.Y("code_article:Q", title="Nombre de tickets"),
+    color=alt.Color("semaine:N", title="Semaine", scale=alt.Scale(scheme="category20")),
+    tooltip=["semaine", "jour", alt.Tooltip("code_article:Q", format=".0f")]
+).properties(
+    height=400,
+    width=750,
+    title="Tickets par jour et par semaine"
+).configure_mark(strokeWidth=3)
+
+st.altair_chart(fig_tickets, use_container_width=True)
+
+
+# CA TTC
+st.markdown("### 📈 Évolution du CA TTC par semaine")
+ca_chart = df.assign(
+    semaine=df["period_date"].dt.isocalendar().week.astype(int),
+    jour=df["period_date"].dt.weekday.map(JOURS_MAP)
+).groupby(["semaine","jour"])["ventes_ttc"].sum().reset_index()
+
+ca_chart["jour"] = pd.Categorical(ca_chart["jour"], categories=JOURS, ordered=True)
+
+fig_ca = alt.Chart(ca_chart).mark_line(point=alt.OverlayMarkDef(size=70)).encode(
+    x=alt.X("jour", sort=JOURS, title="Jour de la semaine"),
+    y=alt.Y("ventes_ttc:Q", title="CA TTC (€)"),
+    color=alt.Color("semaine:N", title="Semaine", scale=alt.Scale(scheme="category20")),
+    tooltip=["semaine", "jour", alt.Tooltip("ventes_ttc:Q", format=".2f")]
+).properties(
+    height=400,
+    width=750,
+    title="CA TTC par jour et par semaine"
+).configure_mark(strokeWidth=3)
+
+st.altair_chart(fig_ca, use_container_width=True)
+
+
+# Panier moyen
+st.markdown("### 📈 Évolution du Panier moyen par semaine")
+panier_chart = panier.copy()
+panier_chart["jour"] = pd.Categorical(panier_chart["jour"], categories=JOURS, ordered=True)
+
+fig_panier = alt.Chart(panier_chart).mark_line(point=alt.OverlayMarkDef(size=70)).encode(
+    x=alt.X("jour", sort=JOURS, title="Jour de la semaine"),
+    y=alt.Y("panier_moyen:Q", title="Panier moyen (€)"),
+    color=alt.Color("semaine:N", title="Semaine", scale=alt.Scale(scheme="category20")),
+    tooltip=["semaine", "jour", alt.Tooltip("panier_moyen:Q", format=".2f")]
+).properties(
+    height=400,
+    width=750,
+    title="Panier moyen (€) par jour et par semaine"
+).configure_mark(strokeWidth=3)
+
+st.altair_chart(fig_panier, use_container_width=True)
 
 # ---------- Table détaillée ----------
 st.markdown("<p style='font-size:22px; font-weight:700;'>📋 Détail des lignes (période sélectionnée)</p>", unsafe_allow_html=True)
