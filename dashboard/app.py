@@ -639,7 +639,7 @@ else:
     tickets_chart = pd.concat([tickets_sel, moy_tickets], ignore_index=True)
 
     tickets_chart["jour"] = pd.Categorical(tickets_chart["jour"], categories=JOURS, ordered=True)
-    tickets_chart = tickets_chart.sort_values(by="jour")  # 🔑 ordre correct
+    tickets_chart = tickets_chart.sort_values(by=["semaine","jour"])  # 🔑 tri semaine + jour
 
     st.markdown("### 📈 Évolution des Tickets par semaine (3 dernières + Moyenne)")
 
@@ -687,7 +687,7 @@ else:
     ca_chart_df = pd.concat([ca_sel, moy_ca], ignore_index=True)
 
     ca_chart_df["jour"] = pd.Categorical(ca_chart_df["jour"], categories=JOURS, ordered=True)
-    ca_chart_df = ca_chart_df.sort_values(by="jour")  # 🔑 ordre correct
+    ca_chart_df = ca_chart_df.sort_values(by=["semaine","jour"])  # 🔑 tri semaine + jour
 
     st.markdown("### 📈 Évolution du CA TTC par semaine (3 dernières + Moyenne)")
 
@@ -732,7 +732,7 @@ else:
     panier_chart_df = pd.concat([pm_sel[["semaine","jour","panier_moyen"]], moy_pm], ignore_index=True)
 
     panier_chart_df["jour"] = pd.Categorical(panier_chart_df["jour"], categories=JOURS, ordered=True)
-    panier_chart_df = panier_chart_df.sort_values(by="jour")  # 🔑 ordre correct
+    panier_chart_df = panier_chart_df.sort_values(by=["semaine","jour"])  # 🔑 tri semaine + jour
 
     st.markdown("### 📈 Évolution du Panier moyen par semaine (3 dernières + Moyenne)")
 
