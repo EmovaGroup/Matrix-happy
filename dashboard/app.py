@@ -306,6 +306,7 @@ st.divider()
 
 # ---------- Camembert ----------
 st.markdown("<p style='font-size:22px; font-weight:700;'>🥧 Répartition du CA TTC par famille</p>", unsafe_allow_html=True)
+
 target_for_pie = st.selectbox(
     "Choisir le magasin pour le camembert",
     options=[f"Tous magasins ({dstart} → {dend})"] + stores_selected,
@@ -320,13 +321,28 @@ fam = (pie_df.groupby("famille_finale", as_index=False)
               .agg(ca_ttc=("ventes_ttc", "sum")))
 fam["pct"] = fam["ca_ttc"] / fam["ca_ttc"].sum() * 100 if fam["ca_ttc"].sum() else 0
 
+# Trier du plus grand au plus petit
+fam = fam.sort_values("pct", ascending=False)
+
+# Ajouter famille + % pour la légende
+fam["label"] = fam.apply(lambda x: f"{x['famille_finale']} ({x['pct']:.1f}%)", axis=1)
+
+# Définir un ordre explicite (pour légende ET dessin du camembert)
+order = fam["label"].tolist()
+
+# Camembert
 pie = alt.Chart(fam).mark_arc().encode(
-    theta=alt.Theta(field="ca_ttc", type="quantitative", title="CA TTC"),
-    color=alt.Color(field="famille_finale", type="nominal", title="Famille", scale=alt.Scale(scheme="category20")),  # ✅ category20
-    tooltip=["famille_finale",
-             alt.Tooltip("ca_ttc:Q", format=".2f"),
-             alt.Tooltip("pct:Q", format=".1f")]
+    theta=alt.Theta(field="ca_ttc", type="quantitative", title="CA TTC", sort="descending"),
+    color=alt.Color(field="label", type="nominal", title="Famille",
+                    sort=order,  # ordre légende
+                    scale=alt.Scale(scheme="category20", domain=order)),  # ordre couleurs
+    tooltip=[
+        "famille_finale",
+        alt.Tooltip("ca_ttc:Q", format=".2f"),
+        alt.Tooltip("pct:Q", format=".1f")
+    ]
 ).properties(height=360)
+
 st.altair_chart(pie, use_container_width=True)
 
 st.divider()
@@ -583,71 +599,107 @@ st.markdown("### 🛒 Synthèse Panier moyen par semaine")
 st.markdown(render_table(panier_tab.round(2), euro=True), unsafe_allow_html=True)
 get_csv_download_link(panier_tab.round(2), "panier_moyen")
 
-# ---------- Graphiques comparatifs par semaine ----------
+# ---------- Graphiques comparatifs par semaine (3 dernières + Moyenne) ----------
 
-# Tickets
-st.markdown("### 📈 Évolution des Tickets par semaine")
-tickets_chart = df.assign(
-    semaine=df["period_date"].dt.isocalendar().week.astype(int),
-    jour=df["period_date"].dt.weekday.map(JOURS_MAP)
-).groupby(["semaine","jour"])["code_article"].count().reset_index()
+def _last_weeks_list(weeks, n=3):
+    uniq = sorted([int(w) for w in pd.Series(weeks).dropna().unique()])
+    if not uniq:
+        return []
+    return uniq[-n:] if len(uniq) >= n else uniq
 
-tickets_chart["jour"] = pd.Categorical(tickets_chart["jour"], categories=JOURS, ordered=True)
+# Liste ordonnée des jours
+JOURS = ["Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi","Dimanche"]
+JOURS_MAP = {0:"Lundi",1:"Mardi",2:"Mercredi",3:"Jeudi",4:"Vendredi",5:"Samedi",6:"Dimanche"}
 
-fig_tickets = alt.Chart(tickets_chart).mark_line(point=alt.OverlayMarkDef(size=70)).encode(
-    x=alt.X("jour", sort=JOURS, title="Jour de la semaine"),
-    y=alt.Y("code_article:Q", title="Nombre de tickets"),
-    color=alt.Color("semaine:N", title="Semaine", scale=alt.Scale(scheme="category20")),
-    tooltip=["semaine", "jour", alt.Tooltip("code_article:Q", format=".0f")]
-).properties(
-    height=400,
-    width=750,
-    title="Tickets par jour et par semaine"
-).configure_mark(strokeWidth=3)
+# Déterminer les 3 dernières semaines présentes dans **df** (période filtrée)
+_all_weeks = df["period_date"].dt.isocalendar().week.astype(int)
+LAST_WEEKS = _last_weeks_list(_all_weeks, n=3)
+ORDER_DOMAIN = [str(w) for w in LAST_WEEKS] + ["Moyenne"]  # ordre des légendes/couleurs
 
-st.altair_chart(fig_tickets, use_container_width=True)
+# Petite sécurité si pas (encore) 3 semaines dans la période
+if len(LAST_WEEKS) == 0:
+    st.info("Pas de semaines disponibles sur la période choisie.")
+else:
+    # =========================
+    # 1) Tickets (count)
+    # =========================
+    tickets_base = df.assign(
+        semaine=df["period_date"].dt.isocalendar().week.astype(int),
+        jour=df["period_date"].dt.weekday.map(JOURS_MAP)
+    ).groupby(["semaine","jour"])["code_article"].count().reset_index()
 
+    # "Semaine type" = moyenne sur toutes les semaines, par jour
+    moy_tickets = tickets_base.groupby("jour", as_index=False)["code_article"].mean()
+    moy_tickets["semaine"] = "Moyenne"
 
-# CA TTC
-st.markdown("### 📈 Évolution du CA TTC par semaine")
-ca_chart = df.assign(
-    semaine=df["period_date"].dt.isocalendar().week.astype(int),
-    jour=df["period_date"].dt.weekday.map(JOURS_MAP)
-).groupby(["semaine","jour"])["ventes_ttc"].sum().reset_index()
+    # Garder 3 dernières semaines + moyenne
+    tickets_sel = tickets_base[tickets_base["semaine"].isin(LAST_WEEKS)].copy()
+    tickets_sel["semaine"] = tickets_sel["semaine"].astype(str)
+    tickets_chart = pd.concat([tickets_sel, moy_tickets], ignore_index=True)
 
-ca_chart["jour"] = pd.Categorical(ca_chart["jour"], categories=JOURS, ordered=True)
+    tickets_chart["jour"] = pd.Categorical(tickets_chart["jour"], categories=JOURS, ordered=True)
 
-fig_ca = alt.Chart(ca_chart).mark_line(point=alt.OverlayMarkDef(size=70)).encode(
-    x=alt.X("jour", sort=JOURS, title="Jour de la semaine"),
-    y=alt.Y("ventes_ttc:Q", title="CA TTC (€)"),
-    color=alt.Color("semaine:N", title="Semaine", scale=alt.Scale(scheme="category20")),
-    tooltip=["semaine", "jour", alt.Tooltip("ventes_ttc:Q", format=".2f")]
-).properties(
-    height=400,
-    width=750,
-    title="CA TTC par jour et par semaine"
-).configure_mark(strokeWidth=3)
+    st.markdown("### 📈 Évolution des Tickets par semaine")
+    fig_tickets = alt.Chart(tickets_chart).mark_line(point=alt.OverlayMarkDef(size=70)).encode(
+        x=alt.X("jour:N", sort=JOURS, title="Jour de la semaine"),
+        y=alt.Y("code_article:Q", title="Nombre de tickets"),
+        color=alt.Color("semaine:N", title="Semaine",
+                        scale=alt.Scale(scheme="category20", domain=ORDER_DOMAIN)),
+        tooltip=["semaine", "jour", alt.Tooltip("code_article:Q", format=".0f")]
+    ).properties(height=400, width=750, title="Tickets par jour et par semaine").configure_mark(strokeWidth=3)
+    st.altair_chart(fig_tickets, use_container_width=True)
 
-st.altair_chart(fig_ca, use_container_width=True)
+    # =========================
+    # 2) CA TTC (sum)
+    # =========================
+    ca_base = df.assign(
+        semaine=df["period_date"].dt.isocalendar().week.astype(int),
+        jour=df["period_date"].dt.weekday.map(JOURS_MAP)
+    ).groupby(["semaine","jour"])["ventes_ttc"].sum().reset_index()
 
+    moy_ca = ca_base.groupby("jour", as_index=False)["ventes_ttc"].mean()
+    moy_ca["semaine"] = "Moyenne"
 
-# Panier moyen
-st.markdown("### 📈 Évolution du Panier moyen par semaine")
-panier_chart = panier.copy()
-panier_chart["jour"] = pd.Categorical(panier_chart["jour"], categories=JOURS, ordered=True)
+    ca_sel = ca_base[ca_base["semaine"].isin(LAST_WEEKS)].copy()
+    ca_sel["semaine"] = ca_sel["semaine"].astype(str)
+    ca_chart_df = pd.concat([ca_sel, moy_ca], ignore_index=True)
 
-fig_panier = alt.Chart(panier_chart).mark_line(point=alt.OverlayMarkDef(size=70)).encode(
-    x=alt.X("jour", sort=JOURS, title="Jour de la semaine"),
-    y=alt.Y("panier_moyen:Q", title="Panier moyen (€)"),
-    color=alt.Color("semaine:N", title="Semaine", scale=alt.Scale(scheme="category20")),
-    tooltip=["semaine", "jour", alt.Tooltip("panier_moyen:Q", format=".2f")]
-).properties(
-    height=400,
-    width=750,
-    title="Panier moyen (€) par jour et par semaine"
-).configure_mark(strokeWidth=3)
+    ca_chart_df["jour"] = pd.Categorical(ca_chart_df["jour"], categories=JOURS, ordered=True)
 
-st.altair_chart(fig_panier, use_container_width=True)
+    st.markdown("### 📈 Évolution du CA TTC par semaine")
+    fig_ca = alt.Chart(ca_chart_df).mark_line(point=alt.OverlayMarkDef(size=70)).encode(
+        x=alt.X("jour:N", sort=JOURS, title="Jour de la semaine"),
+        y=alt.Y("ventes_ttc:Q", title="CA TTC (€)"),
+        color=alt.Color("semaine:N", title="Semaine",
+                        scale=alt.Scale(scheme="category20", domain=ORDER_DOMAIN)),
+        tooltip=["semaine", "jour", alt.Tooltip("ventes_ttc:Q", format=".2f")]
+    ).properties(height=400, width=750, title="CA TTC par jour et par semaine").configure_mark(strokeWidth=3)
+    st.altair_chart(fig_ca, use_container_width=True)
+
+    # =========================
+    # 3) Panier moyen (moyenne CA/tickets) — on repart de `panier` déjà calculé plus haut
+    # =========================
+    # `panier` existe déjà plus haut : colonnes ["semaine","jour","tickets","ca_ttc","panier_moyen"]
+    panier_chart = panier.copy()
+
+    moy_pm = panier_chart.groupby("jour", as_index=False)["panier_moyen"].mean()
+    moy_pm["semaine"] = "Moyenne"
+
+    pm_sel = panier_chart[panier_chart["semaine"].isin(LAST_WEEKS)].copy()
+    pm_sel["semaine"] = pm_sel["semaine"].astype(str)
+    panier_chart_df = pd.concat([pm_sel[["semaine","jour","panier_moyen"]], moy_pm], ignore_index=True)
+
+    panier_chart_df["jour"] = pd.Categorical(panier_chart_df["jour"], categories=JOURS, ordered=True)
+
+    st.markdown("### 📈 Évolution du Panier moyen par semaine")
+    fig_panier = alt.Chart(panier_chart_df).mark_line(point=alt.OverlayMarkDef(size=70)).encode(
+        x=alt.X("jour:N", sort=JOURS, title="Jour de la semaine"),
+        y=alt.Y("panier_moyen:Q", title="Panier moyen (€)"),
+        color=alt.Color("semaine:N", title="Semaine",
+                        scale=alt.Scale(scheme="category20", domain=ORDER_DOMAIN)),
+        tooltip=["semaine", "jour", alt.Tooltip("panier_moyen:Q", format=".2f")]
+    ).properties(height=400, width=750, title="Panier moyen (€) par jour et par semaine").configure_mark(strokeWidth=3)
+    st.altair_chart(fig_panier, use_container_width=True)
 
 # ---------- Table détaillée ----------
 st.markdown("<p style='font-size:22px; font-weight:700;'>📋 Détail des lignes (période sélectionnée)</p>", unsafe_allow_html=True)
