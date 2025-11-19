@@ -67,7 +67,6 @@ ALLOWED = {
     "n.dubois@emova-group.com",
     "s.maslaga@emova-group.com",
     "ym.gille@emova-group.com",
-    "t.vernageau@emova-group.com",
 }
 
 # ---------- Auth ----------
@@ -108,8 +107,7 @@ USER_NAMES = {
     "dsi@emova-group.com": "DSI",
     "n.dubois@emova-group.com": "Nicolas Dubois",
     "s.maslaga@emova-group.com": "Saloua Maslaga",
-    "ym.gille@emova-group.com": "Yves-Marie Gille",
-    "t.vernageau@emova-group.com": "Thierry Vernageau"
+    "ym.gille@emova-group.com": "Yves-Marie Gille"
 }
 
 email = user.email.lower()
@@ -227,7 +225,7 @@ if df.empty:
     st.stop()
 
 # ---------- KPIs ----------
-col1, col2, col3, col4 = st.columns(4)
+
 def kpi_card(title, value, emoji):
     return f"""
     <div style="border: 3px solid red; border-radius: 12px; padding: 20px; text-align: center;
@@ -241,17 +239,89 @@ def kpi_card(title, value, emoji):
         </div>
     </div>
     """
-with col1:
-    st.markdown(kpi_card("CA TTC", f"{df['ventes_ttc'].sum():,.2f} €".replace(",", " ").replace(".", ","), "💰"), unsafe_allow_html=True)
-with col2:
-    st.markdown(kpi_card("CA HT", f"{df['ventes_ht'].sum():,.2f} €".replace(",", " ").replace(".", ","), "📊"), unsafe_allow_html=True)
-with col3:
-    st.markdown(kpi_card("Marge HT", f"{df['marge_ht'].sum():,.2f} €".replace(",", " ").replace(".", ","), "🏦"), unsafe_allow_html=True)
-with col4:
+
+# ================================
+# 🔵 LIGNE 1 — KPI principaux
+# ================================
+row1_col1, row1_col2, row1_col3 = st.columns(3)
+
+# 1️⃣ CA TTC
+with row1_col1:
+    st.markdown(
+        kpi_card(
+            "CA TTC",
+            f"{df['ventes_ttc'].sum():,.2f} €".replace(",", " ").replace(".", ","),
+            "💰"
+        ),
+        unsafe_allow_html=True
+    )
+
+# 2️⃣ Articles vendus (quantité totale)
+with row1_col2:
+    articles_total = df["qte"].sum()
+    st.markdown(
+        kpi_card(
+            "Nombre d'articles vendus",
+            f"{articles_total:,.0f}".replace(",", " "),
+            "🛒"
+        ),
+        unsafe_allow_html=True
+    )
+
+# 3️⃣ Prix moyen d’un article vendu
+with row1_col3:
+    total_ca = df["ventes_ttc"].sum()
+    prix_moyen = total_ca / articles_total if articles_total else 0
+    st.markdown(
+        kpi_card(
+            "Prix moyen d'article",
+            f"{prix_moyen:,.2f} €".replace(",", " ").replace(".", ","),
+            "📦"
+        ),
+        unsafe_allow_html=True
+    )
+st.markdown("<div style='height:25px;'></div>", unsafe_allow_html=True)
+# ================================
+# 🔵 LIGNE 2 — KPI complémentaires
+# ================================
+row2_col1, row2_col2, row2_col3 = st.columns(3)
+
+# 4️⃣ CA HT
+with row2_col1:
+    st.markdown(
+        kpi_card(
+            "CA HT",
+            f"{df['ventes_ht'].sum():,.2f} €".replace(",", " ").replace(".", ","),
+            "📊"
+        ),
+        unsafe_allow_html=True
+    )
+
+# 5️⃣ Marge HT
+with row2_col2:
+    st.markdown(
+        kpi_card(
+            "Marge HT",
+            f"{df['marge_ht'].sum():,.2f} €".replace(",", " ").replace(".", ","),
+            "🏦"
+        ),
+        unsafe_allow_html=True
+    )
+
+# 6️⃣ Marge %
+with row2_col3:
     pct = (df["marge_ht"].sum() / df["ventes_ht"].sum() * 100) if df["ventes_ht"].sum() else 0
-    st.markdown(kpi_card("Marge %", f"{pct:,.2f} %".replace(",", " ").replace(".", ","), "🔥"), unsafe_allow_html=True)
+    st.markdown(
+        kpi_card(
+            "Marge %",
+            f"{pct:,.2f} %".replace(",", " ").replace(".", ","),
+            "🔥"
+        ),
+        unsafe_allow_html=True
+    )
 
 st.divider()
+
 # ---------- Courbe comparative ----------
 def aggregate(df_in: pd.DataFrame, granularity: str, by_store=True) -> pd.DataFrame:
     dfg = df_in.copy()
@@ -375,7 +445,7 @@ bar = alt.Chart(top_articles).mark_bar().encode(
 st.altair_chart(bar, use_container_width=True)
 
 # ---------- Synthèse Tickets & CA TTC ----------
-st.markdown("## 📊 Synthèse Tickets & CA TTC")
+st.markdown("## 📊 Synthèse Articles & CA TTC")
 
 JOURS = ["Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi","Dimanche"]
 JOURS_MAP = {0:"Lundi",1:"Mardi",2:"Mercredi",3:"Jeudi",4:"Vendredi",5:"Samedi",6:"Dimanche"}
@@ -536,7 +606,7 @@ totals_row_t["Jour"] = "TOTAL"
 totals_row_t["Moyenne"] = totals_row_t[week_cols].mean()
 tickets = pd.concat([tickets, totals_row_t.to_frame().T], ignore_index=True)
 
-st.markdown("### 🎟️ Synthèse Tickets par semaine")
+st.markdown("### 🎟️ Synthèse Articles par semaine")
 st.markdown(render_table(tickets, euro=False), unsafe_allow_html=True)
 get_csv_download_link(tickets, "tickets")
 
@@ -597,7 +667,7 @@ for col in week_cols_pm:
 panier_tab = pd.concat([panier_tab, totals_row_pm.to_frame().T], ignore_index=True)
 
 # Affichage
-st.markdown("### 🛒 Synthèse Panier moyen par semaine")
+st.markdown("### 🛒 Synthèse Prix moyen d'article par semaine")
 st.markdown(render_table(panier_tab.round(2), euro=True), unsafe_allow_html=True)
 get_csv_download_link(panier_tab.round(2), "panier_moyen")
 
@@ -643,13 +713,13 @@ else:
     tickets_chart["jour"] = pd.Categorical(tickets_chart["jour"], categories=JOURS, ordered=True)
     tickets_chart = tickets_chart.sort_values(by=["semaine","jour"])  # 🔑 tri semaine + jour
 
-    st.markdown("### 📈 Évolution des Tickets par semaine (3 dernières + Moyenne)")
+    st.markdown("### 📈 Évolution des Articles par semaine (3 dernières + Moyenne)")
 
     base_tickets = alt.Chart(tickets_chart[tickets_chart["semaine"]!="Moyenne"]).mark_line(
         point=alt.OverlayMarkDef(size=70)
     ).encode(
         x=alt.X("jour:N", sort=JOURS, title="Jour de la semaine"),
-        y=alt.Y("code_article:Q", title="Nombre de tickets"),
+        y=alt.Y("code_article:Q", title="Nombre d'articles"),
         color=alt.Color("semaine:N", title="Semaine",
                         scale=alt.Scale(domain=ORDER_DOMAIN, range=ORDER_RANGE)),
         tooltip=["semaine","jour",alt.Tooltip("code_article:Q", format=".0f")]
@@ -736,13 +806,13 @@ else:
     panier_chart_df["jour"] = pd.Categorical(panier_chart_df["jour"], categories=JOURS, ordered=True)
     panier_chart_df = panier_chart_df.sort_values(by=["semaine","jour"])  # 🔑 tri semaine + jour
 
-    st.markdown("### 📈 Évolution du Panier moyen par semaine (3 dernières + Moyenne)")
+    st.markdown("### 📈 Évolution du Prix moyen d'article par semaine (3 dernières + Moyenne)")
 
     base_pm = alt.Chart(panier_chart_df[panier_chart_df["semaine"]!="Moyenne"]).mark_line(
         point=alt.OverlayMarkDef(size=70)
     ).encode(
         x=alt.X("jour:N", sort=JOURS, title="Jour de la semaine"),
-        y=alt.Y("panier_moyen:Q", title="Panier moyen (€)"),
+        y=alt.Y("panier_moyen:Q", title="Prix moyen d'article (€)"),
         color=alt.Color("semaine:N", title="Semaine",
                         scale=alt.Scale(domain=ORDER_DOMAIN, range=ORDER_RANGE)),
         tooltip=["semaine","jour",alt.Tooltip("panier_moyen:Q", format=".2f")]
@@ -760,7 +830,7 @@ else:
     )
 
     fig_panier = (base_pm + moy_line_pm).properties(
-        height=400, width=750, title="Panier moyen (€) par jour et par semaine"
+        height=400, width=750, title="Prix moyen d'article (€) par jour et par semaine"
     ).configure_mark(strokeWidth=3)
 
     st.altair_chart(fig_panier, use_container_width=True)
