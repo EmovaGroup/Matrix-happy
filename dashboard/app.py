@@ -68,6 +68,7 @@ ALLOWED = {
     "s.maslaga@emova-group.com",
     "ym.gille@emova-group.com",
     "t.vernageau@emova-group.com",
+    "m.laghouanem@emova-group.com",
 }
 
 # ---------- Auth ----------
@@ -109,7 +110,8 @@ USER_NAMES = {
     "n.dubois@emova-group.com": "Nicolas Dubois",
     "s.maslaga@emova-group.com": "Saloua Maslaga",
     "ym.gille@emova-group.com": "Yves-Marie Gille",
-    "t.vernageau@emova-group.com": "Thierry Vernageau"
+    "t.vernageau@emova-group.com": "Thierry Vernageau",
+    "m.laghouanem@emova-group.com": "Malek Laghouanem"
 }
 
 email = user.email.lower()
