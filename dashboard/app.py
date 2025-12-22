@@ -643,7 +643,7 @@ panier = df.assign(
     semaine=df["period_date"].dt.isocalendar().week.astype(int),
     jour=df["period_date"].dt.weekday.map(JOURS_MAP)
 ).groupby(["jour","semaine"]).agg(
-    tickets=("code_article", "count"),
+    tickets=("qte", "sum"),
     ca_ttc=("ventes_ttc", "sum")
 ).reset_index()
 
