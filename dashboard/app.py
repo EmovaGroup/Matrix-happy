@@ -594,7 +594,7 @@ def get_csv_download_link(df, filename):
 tickets = df.assign(
     semaine=df["period_date"].dt.isocalendar().week.astype(int),
     jour=df["period_date"].dt.weekday.map(JOURS_MAP)
-).groupby(["jour","semaine"])["code_article"].count().unstack().reindex(JOURS)
+).groupby(["jour","semaine"])["qte"].count().unstack().reindex(JOURS)
 
 tickets.columns.name = None
 tickets = tickets.rename(columns=lambda c: f"Semaine {c}" if str(c).isdigit() else c)
