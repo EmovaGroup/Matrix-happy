@@ -610,7 +610,7 @@ totals_row_t["Jour"] = "TOTAL"
 totals_row_t["Moyenne"] = totals_row_t[week_cols].mean()
 tickets = pd.concat([tickets, totals_row_t.to_frame().T], ignore_index=True)
 
-st.markdown("### 🎟️ Synthèse Articles par semaine")
+st.markdown("### 🎟️ Synthèse des articles vendus (quantités) par semaine")
 st.markdown(render_table(tickets, euro=False), unsafe_allow_html=True)
 get_csv_download_link(tickets, "tickets")
 
