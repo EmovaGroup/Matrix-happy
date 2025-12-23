@@ -557,7 +557,7 @@ def format_cell(val, mean, euro=False):
     if euro:
         text = f"{num_val:,.2f} €".replace(",", " ").replace(".", ",")
     else:
-        text = f"{num_val:.0f}"
+        text = f"{int(round(num_val))}"
 
     return f"<div style='background-color:{color}; border-radius:8px; padding:6px 12px; text-align:center; color:{text_color};'>{text} {arrow}</div>"
 
