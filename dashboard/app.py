@@ -600,24 +600,32 @@ df = df.assign(
     )
 )
 key_to_label = df.drop_duplicates("iso_key").set_index("iso_key")["iso_label"].to_dict()
-# --- Tickets ---
-tickets = df.assign(
-    jour=df["period_date"].dt.weekday.map(JOURS_MAP)
-).groupby(["jour", "iso_key"])["qte"].sum().unstack().reindex(JOURS)
-
+# --- Tickets (quantités) ---
+tickets = (
+    df.assign(jour=df["period_date"].dt.weekday.map(JOURS_MAP))
+      .groupby(["jour", "iso_key"])["qte"].sum()
+      .unstack()
+      .reindex(JOURS)
+)
 # Renommer colonnes avec label lisible
 col_map = df.drop_duplicates("iso_key").set_index("iso_key")["iso_label"].to_dict()
 tickets = tickets.rename(columns=col_map)
 
-# Ordonner colonnes du plus récent au plus ancien (clé iso_key)
+# ✅ Ordonner colonnes du plus récent au plus ancien
 ordered_keys_desc = sorted(df["iso_key"].dropna().unique(), reverse=True)
 ordered_labels_desc = [col_map[k] for k in ordered_keys_desc if k in col_map and col_map[k] in tickets.columns]
 tickets = tickets[ordered_labels_desc]
 
+# ✅ IMPORTANT : supprimer le "name" des colonnes (= iso_key) qui crée la fausse colonne
+tickets.columns.name = None
+tickets.index.name = None
+
+# Construire la table finale
 tickets.insert(0, "Jour", tickets.index)
 tickets["Moyenne"] = tickets[ordered_labels_desc].mean(axis=1)
 
-totals_row_t = tickets[ordered_labels_desc].sum()
+# Ligne TOTAL
+totals_row_t = tickets[ordered_labels_desc].sum(numeric_only=True)
 totals_row_t["Jour"] = "TOTAL"
 totals_row_t["Moyenne"] = totals_row_t[ordered_labels_desc].mean()
 tickets = pd.concat([tickets, totals_row_t.to_frame().T], ignore_index=True)
@@ -627,26 +635,37 @@ st.markdown(render_table(tickets, euro=False), unsafe_allow_html=True)
 get_csv_download_link(tickets, "tickets")
 
 # --- CA TTC ---
-ca = df.assign(
-    jour=df["period_date"].dt.weekday.map(JOURS_MAP)
-).groupby(["jour", "iso_key"])["ventes_ttc"].sum().unstack().reindex(JOURS)
+ca = (
+    df.assign(jour=df["period_date"].dt.weekday.map(JOURS_MAP))
+      .groupby(["jour", "iso_key"])["ventes_ttc"].sum()
+      .unstack()
+      .reindex(JOURS)
+)
 
+# Renommer colonnes avec label lisible
 col_map = df.drop_duplicates("iso_key").set_index("iso_key")["iso_label"].to_dict()
 ca = ca.rename(columns=col_map)
 
+# ✅ Ordonner colonnes du plus récent au plus ancien
 ordered_keys_desc = sorted(df["iso_key"].dropna().unique(), reverse=True)
 ordered_labels_desc = [col_map[k] for k in ordered_keys_desc if k in col_map and col_map[k] in ca.columns]
 ca = ca[ordered_labels_desc]
 
+# ✅ IMPORTANT : supprimer le "name" des colonnes (= iso_key) qui crée la fausse colonne
+ca.columns.name = None
+ca.index.name = None
+
+# Construire la table finale
 ca.insert(0, "Jour", ca.index)
 ca["Moyenne"] = ca[ordered_labels_desc].mean(axis=1)
 
-totals_row_c = ca[ordered_labels_desc].sum()
+# Ligne TOTAL
+totals_row_c = ca[ordered_labels_desc].sum(numeric_only=True)
 totals_row_c["Jour"] = "TOTAL"
 totals_row_c["Moyenne"] = totals_row_c[ordered_labels_desc].mean()
 ca = pd.concat([ca, totals_row_c.to_frame().T], ignore_index=True)
 
-st.markdown("### 💶 Synthèse Ca ttc par semaine")
+st.markdown("### 💶 Synthèse CA TTC par semaine")
 st.markdown(render_table(ca, euro=True), unsafe_allow_html=True)
 get_csv_download_link(ca, "ca_ttc")
 
