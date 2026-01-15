@@ -589,25 +589,37 @@ def get_csv_download_link(df, filename):
         file_name=f"{filename}.csv",
         mime="text/csv"
     )
-
+# --- Semaine ISO (année + semaine) pour ordre correct ---
+iso = df["period_date"].dt.isocalendar()
+df = df.assign(
+    iso_year=iso.year.astype(int),
+    iso_week=iso.week.astype(int),
+    iso_key=(iso.year.astype(int) * 100 + iso.week.astype(int)),  # ex: 202601
+    iso_label=(  # ex: S01-2026
+        "S" + iso.week.astype(int).astype(str).str.zfill(2) + "-" + iso.year.astype(int).astype(str)
+    )
+)
+key_to_label = df.drop_duplicates("iso_key").set_index("iso_key")["iso_label"].to_dict()
 # --- Tickets ---
 tickets = df.assign(
-    semaine=df["period_date"].dt.isocalendar().week.astype(int),
     jour=df["period_date"].dt.weekday.map(JOURS_MAP)
-).groupby(["jour","semaine"])["qte"].sum().unstack().reindex(JOURS)
+).groupby(["jour", "iso_key"])["qte"].sum().unstack().reindex(JOURS)
 
-tickets.columns.name = None
-tickets = tickets.rename(columns=lambda c: f"Semaine {c}" if str(c).isdigit() else c)
+# Renommer colonnes avec label lisible
+col_map = df.drop_duplicates("iso_key").set_index("iso_key")["iso_label"].to_dict()
+tickets = tickets.rename(columns=col_map)
 
-week_cols = list(tickets.columns)[::-1]
-tickets = tickets[week_cols]
+# Ordonner colonnes du plus récent au plus ancien (clé iso_key)
+ordered_keys_desc = sorted(df["iso_key"].dropna().unique(), reverse=True)
+ordered_labels_desc = [col_map[k] for k in ordered_keys_desc if k in col_map and col_map[k] in tickets.columns]
+tickets = tickets[ordered_labels_desc]
 
 tickets.insert(0, "Jour", tickets.index)
-tickets["Moyenne"] = tickets[week_cols].mean(axis=1)
+tickets["Moyenne"] = tickets[ordered_labels_desc].mean(axis=1)
 
-totals_row_t = tickets[week_cols].sum()
+totals_row_t = tickets[ordered_labels_desc].sum()
 totals_row_t["Jour"] = "TOTAL"
-totals_row_t["Moyenne"] = totals_row_t[week_cols].mean()
+totals_row_t["Moyenne"] = totals_row_t[ordered_labels_desc].mean()
 tickets = pd.concat([tickets, totals_row_t.to_frame().T], ignore_index=True)
 
 st.markdown("### 🎟️ Synthèse des articles vendus (quantités) par semaine")
@@ -616,22 +628,22 @@ get_csv_download_link(tickets, "tickets")
 
 # --- CA TTC ---
 ca = df.assign(
-    semaine=df["period_date"].dt.isocalendar().week.astype(int),
     jour=df["period_date"].dt.weekday.map(JOURS_MAP)
-).groupby(["jour","semaine"])["ventes_ttc"].sum().unstack().reindex(JOURS)
+).groupby(["jour", "iso_key"])["ventes_ttc"].sum().unstack().reindex(JOURS)
 
-ca.columns.name = None
-ca = ca.rename(columns=lambda c: f"Semaine {c}" if str(c).isdigit() else c)
+col_map = df.drop_duplicates("iso_key").set_index("iso_key")["iso_label"].to_dict()
+ca = ca.rename(columns=col_map)
 
-week_cols_ca = list(ca.columns)[::-1]
-ca = ca[week_cols_ca]
+ordered_keys_desc = sorted(df["iso_key"].dropna().unique(), reverse=True)
+ordered_labels_desc = [col_map[k] for k in ordered_keys_desc if k in col_map and col_map[k] in ca.columns]
+ca = ca[ordered_labels_desc]
 
 ca.insert(0, "Jour", ca.index)
-ca["Moyenne"] = ca[week_cols_ca].mean(axis=1)
+ca["Moyenne"] = ca[ordered_labels_desc].mean(axis=1)
 
-totals_row_c = ca[week_cols_ca].sum()
+totals_row_c = ca[ordered_labels_desc].sum()
 totals_row_c["Jour"] = "TOTAL"
-totals_row_c["Moyenne"] = totals_row_c[week_cols_ca].mean()
+totals_row_c["Moyenne"] = totals_row_c[ordered_labels_desc].mean()
 ca = pd.concat([ca, totals_row_c.to_frame().T], ignore_index=True)
 
 st.markdown("### 💶 Synthèse Ca ttc par semaine")
@@ -640,34 +652,35 @@ get_csv_download_link(ca, "ca_ttc")
 
 # --- Panier moyen ---
 panier = df.assign(
-    semaine=df["period_date"].dt.isocalendar().week.astype(int),
     jour=df["period_date"].dt.weekday.map(JOURS_MAP)
-).groupby(["jour","semaine"]).agg(
+).groupby(["iso_key","jour"]).agg(
     tickets=("qte", "sum"),
     ca_ttc=("ventes_ttc", "sum")
 ).reset_index()
+panier["semaine"] = panier["iso_key"].map(key_to_label)
 
-# Calcul du panier moyen = CA / tickets
 panier["panier_moyen"] = panier["ca_ttc"] / panier["tickets"]
 
-# Pivot table comme les autres
-panier_tab = panier.pivot(index="jour", columns="semaine", values="panier_moyen").reindex(JOURS)
+# Pivot
+panier_tab = panier.pivot(index="jour", columns="iso_key", values="panier_moyen").reindex(JOURS)
 
-panier_tab.columns.name = None
-panier_tab = panier_tab.rename(columns=lambda c: f"Semaine {c}" if str(c).isdigit() else c)
+col_map = df.drop_duplicates("iso_key").set_index("iso_key")["iso_label"].to_dict()
+panier_tab = panier_tab.rename(columns=col_map)
 
-week_cols_pm = list(panier_tab.columns)[::-1]
-panier_tab = panier_tab[week_cols_pm]
+ordered_keys_desc = sorted(df["iso_key"].dropna().unique(), reverse=True)
+ordered_labels_desc = [col_map[k] for k in ordered_keys_desc if k in col_map and col_map[k] in panier_tab.columns]
+panier_tab = panier_tab[ordered_labels_desc]
 
 panier_tab.insert(0, "Jour", panier_tab.index)
-panier_tab["Moyenne"] = panier_tab[week_cols_pm].mean(axis=1)
+panier_tab["Moyenne"] = panier_tab[ordered_labels_desc].mean(axis=1)
 
 # Ligne TOTAL
 totals_row_pm = pd.Series(dtype="float64")
 totals_row_pm["Jour"] = "TOTAL"
-totals_row_pm["Moyenne"] = panier_tab[week_cols_pm].mean().mean()
-for col in week_cols_pm:
+totals_row_pm["Moyenne"] = panier_tab[ordered_labels_desc].mean().mean()
+for col in ordered_labels_desc:
     totals_row_pm[col] = panier_tab[col].mean()
+
 panier_tab = pd.concat([panier_tab, totals_row_pm.to_frame().T], ignore_index=True)
 
 # Affichage
@@ -676,57 +689,62 @@ st.markdown(render_table(panier_tab.round(2), euro=True), unsafe_allow_html=True
 get_csv_download_link(panier_tab.round(2), "panier_moyen")
 
 # ---------- Graphiques comparatifs par semaine (3 dernières + Moyenne) ----------
-
-def _last_weeks_list(weeks, n=3):
-    uniq = sorted([int(w) for w in pd.Series(weeks).dropna().unique()])
-    if not uniq:
-        return []
-    return uniq[-n:] if len(uniq) >= n else uniq
+# ⚠️ PRÉ-REQUIS : key_to_label doit déjà exister plus haut (tu l'as déjà ajouté ✅)
 
 # Liste ordonnée des jours
 JOURS = ["Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi","Dimanche"]
 JOURS_MAP = {0:"Lundi",1:"Mardi",2:"Mercredi",3:"Jeudi",4:"Vendredi",5:"Samedi",6:"Dimanche"}
 
-# Dernières semaines présentes
-_all_weeks = df["period_date"].dt.isocalendar().week.astype(int)
-LAST_WEEKS = _last_weeks_list(_all_weeks, n=3)
+def _last_weeks_keys(df_in, n=3):
+    uniq = sorted(df_in["iso_key"].dropna().unique())
+    return uniq[-n:] if len(uniq) >= n else uniq
+
+LAST_WEEKS_KEYS = _last_weeks_keys(df, n=3)
+
+# ✅ labels des 3 dernières semaines (ordre chrono)
+LAST_WEEKS_LABELS = [key_to_label[k] for k in LAST_WEEKS_KEYS if k in key_to_label]
 
 # Couleur spéciale Moyenne
 MOYENNE_COLOR = "#1F7A8C"  # Bleu Manceau Fleurs
-ORDER_DOMAIN = [str(w) for w in LAST_WEEKS] + ["Moyenne"]
-ORDER_RANGE = ["#1f77b4","#2ca02c","#ff7f0e",MOYENNE_COLOR]
 
-if len(LAST_WEEKS) == 0:
+# ✅ ordre FINAL : 3 semaines puis Moyenne
+ORDER_DOMAIN = LAST_WEEKS_LABELS + ["Moyenne"]
+ORDER_RANGE = ["#1f77b4", "#2ca02c", "#ff7f0e", MOYENNE_COLOR]
+
+if len(LAST_WEEKS_KEYS) == 0:
     st.info("Pas de semaines disponibles sur la période choisie.")
 else:
-    # =========================
-    # 1) Tickets
-    # =========================
+    # =========================================================
+    # 1) ARTICLES (qte)
+    # =========================================================
     tickets_base = df.assign(
-        semaine=df["period_date"].dt.isocalendar().week.astype(int),
+        semaine=df["iso_label"],
         jour=df["period_date"].dt.weekday.map(JOURS_MAP)
-    ).groupby(["semaine","jour"])["code_article"].count().reset_index()
+    ).groupby(["semaine","jour"])["qte"].sum().reset_index()
 
-    moy_tickets = tickets_base.groupby("jour", as_index=False)["code_article"].mean()
+    # Moyenne (sur TOUTES les semaines de la période)
+    moy_tickets = tickets_base.groupby("jour", as_index=False)["qte"].mean()
     moy_tickets["semaine"] = "Moyenne"
 
-    tickets_sel = tickets_base[tickets_base["semaine"].isin(LAST_WEEKS)].copy()
-    tickets_sel["semaine"] = tickets_sel["semaine"].astype(str)
+    # Filtre 3 dernières semaines
+    tickets_sel = tickets_base[tickets_base["semaine"].isin(LAST_WEEKS_LABELS)].copy()
+
     tickets_chart = pd.concat([tickets_sel, moy_tickets], ignore_index=True)
 
+    # ✅ ordre jour + ordre semaine (pas alphabétique)
     tickets_chart["jour"] = pd.Categorical(tickets_chart["jour"], categories=JOURS, ordered=True)
-    tickets_chart = tickets_chart.sort_values(by=["semaine","jour"])  # 🔑 tri semaine + jour
+    tickets_chart["semaine"] = pd.Categorical(tickets_chart["semaine"], categories=ORDER_DOMAIN, ordered=True)
+    tickets_chart = tickets_chart.sort_values(["semaine","jour"])
 
-    st.markdown("### 📈 Évolution des Articles par semaine (3 dernières + Moyenne)")
+    st.markdown("### 📈 Évolution des Articles (qte) — 3 dernières semaines + Moyenne")
 
     base_tickets = alt.Chart(tickets_chart[tickets_chart["semaine"]!="Moyenne"]).mark_line(
         point=alt.OverlayMarkDef(size=70)
     ).encode(
         x=alt.X("jour:N", sort=JOURS, title="Jour de la semaine"),
-        y=alt.Y("code_article:Q", title="Nombre d'articles"),
-        color=alt.Color("semaine:N", title="Semaine",
-                        scale=alt.Scale(domain=ORDER_DOMAIN, range=ORDER_RANGE)),
-        tooltip=["semaine","jour",alt.Tooltip("code_article:Q", format=".0f")]
+        y=alt.Y("qte:Q", title="Articles vendus (qte)"),
+        color=alt.Color("semaine:N", title="Semaine", scale=alt.Scale(domain=ORDER_DOMAIN, range=ORDER_RANGE)),
+        tooltip=["semaine","jour",alt.Tooltip("qte:Q", format=".0f")]
     )
 
     moy_line_tickets = alt.Chart(tickets_chart[tickets_chart["semaine"]=="Moyenne"]).mark_line(
@@ -735,45 +753,42 @@ else:
         strokeWidth=3
     ).encode(
         x=alt.X("jour:N", sort=JOURS),
-        y="code_article:Q",
+        y="qte:Q",
         color=alt.Color("semaine:N", scale=alt.Scale(domain=ORDER_DOMAIN, range=ORDER_RANGE)),
-        tooltip=["semaine","jour",alt.Tooltip("code_article:Q", format=".0f")]
+        tooltip=["semaine","jour",alt.Tooltip("qte:Q", format=".0f")]
     )
 
-    fig_tickets = (base_tickets + moy_line_tickets).properties(
-        height=400, width=750, title="Tickets par jour et par semaine"
-    ).configure_mark(strokeWidth=3)
+    st.altair_chart((base_tickets + moy_line_tickets).properties(height=400).configure_mark(strokeWidth=3),
+                    use_container_width=True)
 
-    st.altair_chart(fig_tickets, use_container_width=True)
+    st.divider()
 
-
-    # =========================
+    # =========================================================
     # 2) CA TTC
-    # =========================
+    # =========================================================
     ca_base = df.assign(
-        semaine=df["period_date"].dt.isocalendar().week.astype(int),
+        semaine=df["iso_label"],
         jour=df["period_date"].dt.weekday.map(JOURS_MAP)
     ).groupby(["semaine","jour"])["ventes_ttc"].sum().reset_index()
 
     moy_ca = ca_base.groupby("jour", as_index=False)["ventes_ttc"].mean()
     moy_ca["semaine"] = "Moyenne"
 
-    ca_sel = ca_base[ca_base["semaine"].isin(LAST_WEEKS)].copy()
-    ca_sel["semaine"] = ca_sel["semaine"].astype(str)
+    ca_sel = ca_base[ca_base["semaine"].isin(LAST_WEEKS_LABELS)].copy()
     ca_chart_df = pd.concat([ca_sel, moy_ca], ignore_index=True)
 
     ca_chart_df["jour"] = pd.Categorical(ca_chart_df["jour"], categories=JOURS, ordered=True)
-    ca_chart_df = ca_chart_df.sort_values(by=["semaine","jour"])  # 🔑 tri semaine + jour
+    ca_chart_df["semaine"] = pd.Categorical(ca_chart_df["semaine"], categories=ORDER_DOMAIN, ordered=True)
+    ca_chart_df = ca_chart_df.sort_values(["semaine","jour"])
 
-    st.markdown("### 📈 Évolution du CA TTC par semaine (3 dernières + Moyenne)")
+    st.markdown("### 📈 Évolution du CA TTC — 3 dernières semaines + Moyenne")
 
     base_ca = alt.Chart(ca_chart_df[ca_chart_df["semaine"]!="Moyenne"]).mark_line(
         point=alt.OverlayMarkDef(size=70)
     ).encode(
         x=alt.X("jour:N", sort=JOURS, title="Jour de la semaine"),
         y=alt.Y("ventes_ttc:Q", title="CA TTC (€)"),
-        color=alt.Color("semaine:N", title="Semaine",
-                        scale=alt.Scale(domain=ORDER_DOMAIN, range=ORDER_RANGE)),
+        color=alt.Color("semaine:N", title="Semaine", scale=alt.Scale(domain=ORDER_DOMAIN, range=ORDER_RANGE)),
         tooltip=["semaine","jour",alt.Tooltip("ventes_ttc:Q", format=".2f")]
     )
 
@@ -788,37 +803,46 @@ else:
         tooltip=["semaine","jour",alt.Tooltip("ventes_ttc:Q", format=".2f")]
     )
 
-    fig_ca = (base_ca + moy_line_ca).properties(
-        height=400, width=750, title="CA TTC par jour et par semaine"
-    ).configure_mark(strokeWidth=3)
+    st.altair_chart((base_ca + moy_line_ca).properties(height=400).configure_mark(strokeWidth=3),
+                    use_container_width=True)
 
-    st.altair_chart(fig_ca, use_container_width=True)
+    st.divider()
 
+    # =========================================================
+    # 3) PANIER MOYEN (= CA TTC / qte) par jour
+    # =========================================================
+    panier_chart = df.assign(
+        semaine=df["iso_label"],
+        jour=df["period_date"].dt.weekday.map(JOURS_MAP)
+    ).groupby(["semaine","jour"]).agg(
+        tickets=("qte", "sum"),
+        ca_ttc=("ventes_ttc", "sum")
+    ).reset_index()
 
-    # =========================
-    # 3) Panier moyen
-    # =========================
-    panier_chart = panier.copy()
+    panier_chart["panier_moyen"] = panier_chart["ca_ttc"] / panier_chart["tickets"].replace({0: pd.NA})
 
     moy_pm = panier_chart.groupby("jour", as_index=False)["panier_moyen"].mean()
     moy_pm["semaine"] = "Moyenne"
 
-    pm_sel = panier_chart[panier_chart["semaine"].isin(LAST_WEEKS)].copy()
-    pm_sel["semaine"] = pm_sel["semaine"].astype(str)
-    panier_chart_df = pd.concat([pm_sel[["semaine","jour","panier_moyen"]], moy_pm], ignore_index=True)
+    pm_sel = panier_chart[panier_chart["semaine"].isin(LAST_WEEKS_LABELS)].copy()
+
+    panier_chart_df = pd.concat(
+        [pm_sel[["semaine","jour","panier_moyen"]], moy_pm],
+        ignore_index=True
+    )
 
     panier_chart_df["jour"] = pd.Categorical(panier_chart_df["jour"], categories=JOURS, ordered=True)
-    panier_chart_df = panier_chart_df.sort_values(by=["semaine","jour"])  # 🔑 tri semaine + jour
+    panier_chart_df["semaine"] = pd.Categorical(panier_chart_df["semaine"], categories=ORDER_DOMAIN, ordered=True)
+    panier_chart_df = panier_chart_df.sort_values(["semaine","jour"])
 
-    st.markdown("### 📈 Évolution du Prix moyen d'article par semaine (3 dernières + Moyenne)")
+    st.markdown("### 📈 Évolution du Prix moyen d'article — 3 dernières semaines + Moyenne")
 
     base_pm = alt.Chart(panier_chart_df[panier_chart_df["semaine"]!="Moyenne"]).mark_line(
         point=alt.OverlayMarkDef(size=70)
     ).encode(
         x=alt.X("jour:N", sort=JOURS, title="Jour de la semaine"),
         y=alt.Y("panier_moyen:Q", title="Prix moyen d'article (€)"),
-        color=alt.Color("semaine:N", title="Semaine",
-                        scale=alt.Scale(domain=ORDER_DOMAIN, range=ORDER_RANGE)),
+        color=alt.Color("semaine:N", title="Semaine", scale=alt.Scale(domain=ORDER_DOMAIN, range=ORDER_RANGE)),
         tooltip=["semaine","jour",alt.Tooltip("panier_moyen:Q", format=".2f")]
     )
 
@@ -833,12 +857,8 @@ else:
         tooltip=["semaine","jour",alt.Tooltip("panier_moyen:Q", format=".2f")]
     )
 
-    fig_panier = (base_pm + moy_line_pm).properties(
-        height=400, width=750, title="Prix moyen d'article (€) par jour et par semaine"
-    ).configure_mark(strokeWidth=3)
-
-    st.altair_chart(fig_panier, use_container_width=True)
-
+    st.altair_chart((base_pm + moy_line_pm).properties(height=400).configure_mark(strokeWidth=3),
+                    use_container_width=True)
 # ---------- Table détaillée ----------
 st.markdown("<p style='font-size:22px; font-weight:700;'>📋 Détail des lignes (période sélectionnée)</p>", unsafe_allow_html=True)
 st.dataframe(
